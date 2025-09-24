@@ -2,14 +2,16 @@
  * @file quiz_ods14.c
  * @author Gemini, com base no protótipo de Prof. Dr. David Buzatto
  * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
- * @version 1.9
+ * @version 2.1
  * @date 2025-09-24
  *
  * @copyright Copyright (c) 2025
  *
- * @note Mudanças da v1.9:
- * - Corrigido erro de compilação ao desenhar a água.
- * - Substituída a chamada incorreta `DrawPoly` pela lógica correta de desenhar a onda com triângulos.
+ * @note Mudanças da v2.1:
+ * - Implementado efeito visual de chuva caindo.
+ * - Ajustada a frequência e os parâmetros das ondulações da água para simular batidas de chuva.
+ * - A animação da água (onda + gotas + chuva visual) agora persiste do SCREEN_ENTER_NAME
+ * até o final do quiz (SCREEN_GAME_OVER), aparecendo por baixo das interfaces.
  */
 
 #include "raylib/raylib.h"
@@ -32,6 +34,23 @@
 #define NUM_HARD 2
 #define LEADERBOARD_SIZE 6
 #define MAX_NAME_LENGTH 3
+
+// Definições para as ondulações na água
+#define MAX_DROPS 60 // Aumentado o número máximo de ondulações ativas
+#define DROP_SPAWN_INTERVAL_MIN 0.1f // Intervalo mínimo de tempo entre ondulações (mais frequente)
+#define DROP_SPAWN_INTERVAL_MAX 0.3f // Intervalo máximo de tempo entre ondulações (mais frequente)
+#define DROP_LIFETIME 1.5f // Tempo de vida da ondulação da gota (ajustado)
+#define DROP_AMPLITUDE_MAX 8.0f // Amplitude máxima inicial da ondulação (ajustado para ser mais sutil para chuva)
+#define DROP_WAVE_SPEED 250.0f // Velocidade de expansão da ondulação
+#define DROP_WAVE_FREQUENCY 0.08f // Frequência da ondulação (mais compacto para chuva)
+
+// <<< NOVAS: Definições para as gotas de chuva visuais >>>
+#define MAX_RAINDROPS 500 // Número de gotas de chuva visuais
+#define RAINDROP_SPEED_MIN 300 // Velocidade mínima da gota
+#define RAINDROP_SPEED_MAX 600 // Velocidade máxima da gota
+#define RAINDROP_LENGTH_MIN 40 // Comprimento mínimo da gota
+#define RAINDROP_LENGTH_MAX 60 // Comprimento máximo da gota
+
 
 //---------------------------------------------
 // Tipos Customizados (Enums, Structs)
@@ -66,6 +85,21 @@ typedef struct {
     int score;
 } PlayerScore;
 
+typedef struct {
+    Vector2 position; // Posição X da gota (Y é o waterLevel)
+    float lifetime;   // Tempo de vida restante da ondulação
+    float spawnTime;  // Tempo em que a ondulação foi criada
+    float initialAmplitude; // Amplitude inicial da ondulação
+} Drop;
+
+// <<< NOVO: Estrutura para uma gota de chuva visual >>>
+typedef struct {
+    Vector2 startPos;
+    float length;
+    float speed;
+} Raindrop;
+
+
 //---------------------------------------------
 // Variáveis Globais
 //---------------------------------------------
@@ -93,12 +127,19 @@ static Texture2D texCredits;
 // Variáveis para controlar a animação da água
 static float waterLevel;
 static bool isWaterAnimating = false;
-static const float WATER_RISE_SPEED = 100.0f;
-static const float TARGET_WATER_LEVEL = 150.0f;
-static float waveAmplitude = 15.0f;
-static float waveFrequency = 0.015f;
+static const float WATER_RISE_SPEED = 120.0f;
+static const float TARGET_WATER_LEVEL = 150.0f; // Altura final da água (Y menor = mais alto)
+static float waveAmplitude = 10.0f;             // Amplitude da onda de fundo (ajustado para ser mais sutil)
+static float waveFrequency = 0.005f;            // Frequência da onda de fundo
 static float waveSpeed = 80.0f;
 static float waveOffset = 0.0f;
+
+static Drop activeDrops[MAX_DROPS];
+static float dropSpawnTimer = 0.0f;
+static float nextDropSpawnTime = 0.0f;
+
+// <<< NOVAS: Variáveis para as gotas de chuva visuais >>>
+static Raindrop raindrops[MAX_RAINDROPS];
 
 
 //---------------------------------------------
@@ -107,6 +148,16 @@ static float waveOffset = 0.0f;
 void UpdateDrawFrame(void);
 void InitializeQuestions(void);
 void LoadLeaderboard(void);
+
+void InitDrops(void);
+void SpawnDrop(void);
+float GetDropWaveContribution(float x, float currentTime);
+
+// <<< NOVO: Protótipos para gotas de chuva visuais >>>
+void InitRaindrops(void);
+void UpdateRaindrops(float deltaTime);
+void DrawRaindrops(void);
+
 
 //---------------------------------------------
 // Banco de Perguntas - ODS 14
@@ -248,6 +299,85 @@ void StartGame() {
     currentScreen = SCREEN_GAMEPLAY;
 }
 
+// Funções para Ondulações (Drops)
+void InitDrops(void) {
+    for (int i = 0; i < MAX_DROPS; i++) {
+        activeDrops[i].lifetime = 0.0f; // Marca como inativa
+    }
+    nextDropSpawnTime = GetRandomValue(DROP_SPAWN_INTERVAL_MIN * 100, DROP_SPAWN_INTERVAL_MAX * 100) / 100.0f;
+}
+
+void SpawnDrop(void) {
+    for (int i = 0; i < MAX_DROPS; i++) {
+        if (activeDrops[i].lifetime <= 0.0f) { // Encontrou um slot inativo
+            activeDrops[i].position.x = (float)GetRandomValue(0, SCREEN_WIDTH);
+            activeDrops[i].lifetime = DROP_LIFETIME;
+            activeDrops[i].spawnTime = GetTime();
+            activeDrops[i].initialAmplitude = (float)GetRandomValue(DROP_AMPLITUDE_MAX * 50, DROP_AMPLITUDE_MAX * 100) / 100.0f;
+            break;
+        }
+    }
+}
+
+float GetDropWaveContribution(float x, float currentTime) {
+    float totalContribution = 0.0f;
+    for (int i = 0; i < MAX_DROPS; i++) {
+        if (activeDrops[i].lifetime > 0.0f) {
+            float timeElapsed = currentTime - activeDrops[i].spawnTime;
+            float distanceToDrop = fabsf(x - activeDrops[i].position.x);
+            
+            float waveRadius = timeElapsed * DROP_WAVE_SPEED;
+            
+            // A ondulação só afeta dentro de um certo raio e atenua com a distância e tempo
+            if (distanceToDrop < waveRadius) {
+                float attenuationFactor = 1.0f - (distanceToDrop / waveRadius);
+                float decayFactor = activeDrops[i].lifetime / DROP_LIFETIME; // Diminui com o tempo de vida da gota
+
+                totalContribution += sinf(distanceToDrop * DROP_WAVE_FREQUENCY - timeElapsed * 15.0f) * // Ajuste de fase para ondulação
+                                     activeDrops[i].initialAmplitude * attenuationFactor * decayFactor;
+            }
+        }
+    }
+    return totalContribution;
+}
+
+// <<< NOVAS FUNÇÕES PARA GOTAS DE CHUVA VISUAIS >>>
+void InitRaindrops(void) {
+    for (int i = 0; i < MAX_RAINDROPS; i++) {
+        raindrops[i].startPos = (Vector2){ (float)GetRandomValue(0, SCREEN_WIDTH), (float)GetRandomValue(-SCREEN_HEIGHT, 0) }; // Começam acima da tela
+        raindrops[i].length = (float)GetRandomValue(RAINDROP_LENGTH_MIN, RAINDROP_LENGTH_MAX);
+        raindrops[i].speed = (float)GetRandomValue(RAINDROP_SPEED_MIN, RAINDROP_SPEED_MAX);
+    }
+}
+
+void UpdateRaindrops(float deltaTime) {
+    for (int i = 0; i < MAX_RAINDROPS; i++) {
+        raindrops[i].startPos.y += raindrops[i].speed * deltaTime;
+        // Se a gota sair da tela, reinicia no topo (incluindo acima do nível da água)
+        if (raindrops[i].startPos.y > SCREEN_HEIGHT) {
+            raindrops[i].startPos = (Vector2){ (float)GetRandomValue(0, SCREEN_WIDTH), (float)GetRandomValue(-SCREEN_HEIGHT, 0) };
+            raindrops[i].length = (float)GetRandomValue(RAINDROP_LENGTH_MIN, RAINDROP_LENGTH_MAX);
+            raindrops[i].speed = (float)GetRandomValue(RAINDROP_SPEED_MIN, RAINDROP_SPEED_MAX);
+        }
+    }
+}
+
+void DrawRaindrops(void) {
+    for (int i = 0; i < MAX_RAINDROPS; i++) {
+        // Desenha a gota apenas se ela estiver acima do nível da água ou abaixo do nível da água com uma pequena transparência.
+        // Isso impede que as gotas de chuva visíveis pareçam entrar na água e sumir abruptamente.
+        // Alternativamente, podemos fazer as gotas terminarem no waterLevel para o efeito de "batida" mais direto.
+        // Vamos fazer as gotas sumirem no waterLevel para o efeito de batida.
+        if (raindrops[i].startPos.y < waterLevel) {
+             DrawLineV(raindrops[i].startPos, (Vector2){ raindrops[i].startPos.x, raindrops[i].startPos.y + raindrops[i].length }, (Color){ 200, 230, 255, 180 });
+        } else if (raindrops[i].startPos.y - raindrops[i].length < waterLevel) {
+            // Desenha apenas a parte da gota que ainda está acima da água
+            DrawLineV((Vector2){ raindrops[i].startPos.x, waterLevel - 2}, (Vector2){ raindrops[i].startPos.x, raindrops[i].startPos.y + raindrops[i].length }, (Color){ 200, 230, 255, 180 });
+        }
+    }
+}
+
+
 //---------------------------------------------
 // Ponto de Entrada Principal (main)
 //---------------------------------------------
@@ -265,6 +395,8 @@ int main(void) {
     InitializeQuestions();
     LoadLeaderboard();
     waterLevel = SCREEN_HEIGHT;
+    InitDrops();
+    InitRaindrops(); // <<< NOVO: Inicializa as gotas de chuva visuais >>>
 
     while (!WindowShouldClose()) {
         UpdateDrawFrame();
@@ -284,6 +416,9 @@ int main(void) {
 // Loop Principal de Atualização e Desenho
 //---------------------------------------------
 void UpdateDrawFrame(void) {
+    float deltaTime = GetFrameTime();
+    float currentTime = GetTime();
+
     if (IsKeyPressed(KEY_F11)) {
         ToggleFullscreen();
     }
@@ -299,10 +434,14 @@ void UpdateDrawFrame(void) {
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 if (CheckCollisionPointRec(mousePos, btnStart)) {
                     currentScreen = SCREEN_ENTER_NAME;
-                    isWaterAnimating = true;
+                    isWaterAnimating = true; // Ativa a água aqui
                     waterLevel = SCREEN_HEIGHT;
                     playerName[0] = '\0';
                     nameCharCount = 0;
+                    dropSpawnTimer = 0.0f;
+                    InitDrops();
+                    InitRaindrops(); // Reinicia as gotas de chuva visuais
+                    nextDropSpawnTime = GetRandomValue(DROP_SPAWN_INTERVAL_MIN * 100, DROP_SPAWN_INTERVAL_MAX * 100) / 100.0f;
                 }
                 if (CheckCollisionPointRec(mousePos, btnHowToPlay)) currentScreen = SCREEN_HOW_TO_PLAY;
                 if (CheckCollisionPointRec(mousePos, btnLeaderboard)) currentScreen = SCREEN_LEADERBOARD;
@@ -313,99 +452,121 @@ void UpdateDrawFrame(void) {
             Rectangle btnBack = { 787, 891, 347, 100 };
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, btnBack)) {
                 currentScreen = SCREEN_MENU;
-                isWaterAnimating = false;
+                isWaterAnimating = false; // Desativa a água ao voltar ao menu
                 waterLevel = SCREEN_HEIGHT;
                 waveOffset = 0.0f;
             }
         } break;
-        case SCREEN_ENTER_NAME: {
+        case SCREEN_ENTER_NAME:
+        case SCREEN_GAMEPLAY:
+        case SCREEN_SHOW_ANSWER:
+        case SCREEN_GAME_OVER: { // Essas telas agora têm a água animada
             int key = GetKeyPressed();
-            if ((key >= KEY_A && key <= KEY_Z) && (nameCharCount < MAX_NAME_LENGTH)) {
-                playerName[nameCharCount++] = (char)key;
-                playerName[nameCharCount] = '\0';
-            }
-            if (IsKeyPressed(KEY_BACKSPACE)) {
-                nameCharCount--;
-                if (nameCharCount < 0) nameCharCount = 0;
-                playerName[nameCharCount] = '\0';
-            }
-            if (IsKeyPressed(KEY_ENTER) && nameCharCount > 0) {
-                StartGame();
-            }
-        } break;
-        case SCREEN_GAMEPLAY: {
-            if (IsKeyPressed(KEY_A)) selectedAnswer = 0;
-            if (IsKeyPressed(KEY_B)) selectedAnswer = 1;
-            if (IsKeyPressed(KEY_C)) selectedAnswer = 2;
-            if (IsKeyPressed(KEY_D)) selectedAnswer = 3;
-            if (IsKeyPressed(KEY_ENTER) && selectedAnswer != -1) {
-                int qIndex = questionOrder[currentQuestionIndex];
-                isAnswerCorrect = (selectedAnswer == questions[qIndex].correctOption);
-                if (isAnswerCorrect) {
-                    playerScore += questions[qIndex].points;
+            if (currentScreen == SCREEN_ENTER_NAME) {
+                if ((key >= KEY_A && key <= KEY_Z) && (nameCharCount < MAX_NAME_LENGTH)) {
+                    playerName[nameCharCount++] = (char)key;
+                    playerName[nameCharCount] = '\0';
                 }
-                currentScreen = SCREEN_SHOW_ANSWER;
-                answerTimer = 2.0f;
-            }
-        } break;
-        case SCREEN_SHOW_ANSWER: {
-            answerTimer -= GetFrameTime();
-            if (answerTimer <= 0) {
-                currentQuestionIndex++;
-                selectedAnswer = -1;
-                if (currentQuestionIndex >= QUIZ_QUESTIONS) {
-                    UpdateLeaderboard();
-                    currentScreen = SCREEN_GAME_OVER;
-                } else {
-                    currentScreen = SCREEN_GAMEPLAY;
+                if (IsKeyPressed(KEY_BACKSPACE)) {
+                    nameCharCount--;
+                    if (nameCharCount < 0) nameCharCount = 0;
+                    playerName[nameCharCount] = '\0';
                 }
-            }
-        } break;
-        case SCREEN_GAME_OVER: {
-            if (IsKeyPressed(KEY_ENTER)) {
-                currentScreen = SCREEN_LEADERBOARD;
+                if (IsKeyPressed(KEY_ENTER) && nameCharCount > 0) {
+                    StartGame();
+                }
+            } else if (currentScreen == SCREEN_GAMEPLAY) {
+                if (IsKeyPressed(KEY_A)) selectedAnswer = 0;
+                if (IsKeyPressed(KEY_B)) selectedAnswer = 1;
+                if (IsKeyPressed(KEY_C)) selectedAnswer = 2;
+                if (IsKeyPressed(KEY_D)) selectedAnswer = 3;
+                if (IsKeyPressed(KEY_ENTER) && selectedAnswer != -1) {
+                    int qIndex = questionOrder[currentQuestionIndex];
+                    isAnswerCorrect = (selectedAnswer == questions[qIndex].correctOption);
+                    if (isAnswerCorrect) {
+                        playerScore += questions[qIndex].points;
+                    }
+                    currentScreen = SCREEN_SHOW_ANSWER;
+                    answerTimer = 2.0f;
+                }
+            } else if (currentScreen == SCREEN_SHOW_ANSWER) {
+                answerTimer -= deltaTime;
+                if (answerTimer <= 0) {
+                    currentQuestionIndex++;
+                    selectedAnswer = -1;
+                    if (currentQuestionIndex >= QUIZ_QUESTIONS) {
+                        UpdateLeaderboard();
+                        currentScreen = SCREEN_GAME_OVER;
+                    } else {
+                        currentScreen = SCREEN_GAMEPLAY;
+                    }
+                }
+            } else if (currentScreen == SCREEN_GAME_OVER) {
+                 if (IsKeyPressed(KEY_ENTER)) {
+                    currentScreen = SCREEN_LEADERBOARD;
+                    isWaterAnimating = false; // Desativa a água ao sair do GAME_OVER
+                    waterLevel = SCREEN_HEIGHT; // Reseta a água
+                    waveOffset = 0.0f;
+                 }
             }
         } break;
         default: break;
     }
 
+    // Lógica de animação da água e onda
     if (isWaterAnimating) {
         if (waterLevel > TARGET_WATER_LEVEL) {
-            waterLevel -= WATER_RISE_SPEED * GetFrameTime();
+            waterLevel -= WATER_RISE_SPEED * deltaTime;
             if (waterLevel < TARGET_WATER_LEVEL) waterLevel = TARGET_WATER_LEVEL;
         }
-        waveOffset += waveSpeed * GetFrameTime();
+        waveOffset += waveSpeed * deltaTime;
         if (waveOffset > SCREEN_WIDTH * 2) waveOffset = 0;
+
+        dropSpawnTimer += deltaTime;
+        if (dropSpawnTimer >= nextDropSpawnTime) {
+            SpawnDrop();
+            dropSpawnTimer = 0.0f;
+            nextDropSpawnTime = GetRandomValue(DROP_SPAWN_INTERVAL_MIN * 100, DROP_SPAWN_INTERVAL_MAX * 100) / 100.0f;
+        }
+
+        for (int i = 0; i < MAX_DROPS; i++) {
+            if (activeDrops[i].lifetime > 0.0f) {
+                activeDrops[i].lifetime -= deltaTime;
+            }
+        }
+        // <<< NOVO: Atualiza as gotas de chuva visuais >>>
+        UpdateRaindrops(deltaTime);
     }
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
 
     if (isWaterAnimating) {
-        // <<< CORRIGIDO: Substituição do DrawPoly pela lógica de triângulos >>>
-        // Esta nova lógica desenha a água como uma série de quadriláteros (2 triângulos cada)
-        for (int x = 0; x < SCREEN_WIDTH; x += 10) // Desenha a onda em segmentos de 10 pixels
+        // Desenha as gotas de chuva visuais ANTES da água, para que pareçam estar caindo sobre ela.
+        DrawRaindrops(); // <<< NOVO: Desenha as gotas de chuva visuais >>>
+        
+        // Desenho da onda com triângulos
+        const int segmentWidth = 5;
+        for (int x = 0; x < SCREEN_WIDTH; x += segmentWidth)
         {
-            // Ponto 1 (superior esquerdo do segmento)
-            float yOffset1 = sinf((x + waveOffset) * waveFrequency) * waveAmplitude;
-            Vector2 p1 = { (float)x, waterLevel + yOffset1 };
+            float baseWaveY1 = sinf((x + waveOffset) * waveFrequency) * waveAmplitude;
+            float baseWaveY2 = sinf((x + segmentWidth + waveOffset) * waveFrequency) * waveAmplitude;
 
-            // Ponto 2 (superior direito do segmento)
-            float yOffset2 = sinf((x + 10 + waveOffset) * waveFrequency) * waveAmplitude;
-            Vector2 p2 = { (float)x + 10, waterLevel + yOffset2 };
+            float dropWaveY1 = GetDropWaveContribution((float)x, currentTime);
+            float dropWaveY2 = GetDropWaveContribution((float)x + segmentWidth, currentTime);
+
+            Vector2 p1 = { (float)x, waterLevel + baseWaveY1 + dropWaveY1 };
+            Vector2 p2 = { (float)x + segmentWidth, waterLevel + baseWaveY2 + dropWaveY2 };
             
-            // Ponto 3 (inferior esquerdo do segmento)
-            Vector2 p3 = { (float)x, SCREEN_HEIGHT };
+            Vector2 p3 = { (float)x, (float)SCREEN_HEIGHT };
+            Vector2 p4 = { (float)x + segmentWidth, (float)SCREEN_HEIGHT };
             
-            // Ponto 4 (inferior direito do segmento)
-            Vector2 p4 = { (float)x + 10, SCREEN_HEIGHT };
-            
-            // Desenha o quadrilátero com dois triângulos
             DrawTriangle(p1, p3, p2, (Color){ 20, 80, 180, 200 });
             DrawTriangle(p2, p3, p4, (Color){ 20, 80, 180, 200 });
         }
     }
 
+    // O restante da interface do jogo é desenhado SOBRE a água
     switch (currentScreen) {
         case SCREEN_MENU: {
             DrawTexture(texMenu, 0, 0, WHITE);
