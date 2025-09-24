@@ -2,14 +2,15 @@
  * @file quiz_ods14.c
  * @author Gemini, com base no protótipo de Prof. Dr. David Buzatto
  * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
- * @version 2.8
+ * @version 3.0
  * @date 2025-09-24
  *
  * @copyright Copyright (c) 2025
  *
- * @note Mudanças da v2.8:
- * - Adicionado um atraso (delay) de 2 segundos antes da animação de subida da água começar,
- * permitindo que o jogador leia a tela de "Digite suas iniciais" com calma.
+ * @note Mudanças da v3.0:
+ * - Adicionado efeito sonoro (type.mp3) para cada tecla pressionada na tela de inserção de nome.
+ * - Adicionado efeito sonoro de vitória (victory.mp3) ao sair da tela de "FIM DE JOGO".
+ * - Otimizado o momento em que a música de fundo (rain.mp3) é interrompida.
  */
 
 #include "raylib/raylib.h"
@@ -151,6 +152,22 @@ static float notificationTimer = 0.0f;
 
 // Timer para a espera da subida da água
 static float waterRiseDelayTimer = 0.0f;
+
+// Variáveis de Áudio
+static Music rainMusic;
+static Sound selectSfx;
+static Sound buttonSfx;
+static Sound correctSfx;
+static Sound wrongSfx;
+static Sound typeSfx;    // <<< NOVO
+static Sound victorySfx; // <<< NOVO
+
+// Variáveis para controlar som de hover
+static bool isHoveringBtnStart = false;
+static bool isHoveringBtnHowToPlay = false;
+static bool isHoveringBtnLeaderboard = false;
+static bool isHoveringBtnCredits = false;
+static bool isHoveringBtnBack = false;
 
 
 //---------------------------------------------
@@ -463,8 +480,10 @@ void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float f
 int main(void) {
     srand(time(NULL));
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Quiz - Navegando pela ODS 14");
-    Image icon = LoadImage("resources/icon.png"); // Carrega a imagem do arquivo
-    SetWindowIcon(icon);                     
+    Image icon = LoadImage("resources/icon.png");
+    SetWindowIcon(icon);
+    
+    InitAudioDevice();
 
     SetTargetFPS(60);
 
@@ -475,8 +494,16 @@ int main(void) {
     texCredits = LoadTexture("resources/tela_creditos.png");
     texLogo = LoadTexture("resources/logo.png");
 
-    // Carrega a fonte em alta qualidade para evitar pixelização
     fontMontserrat = LoadFontEx("resources/montserrat.ttf", 256, NULL, 250);
+
+    selectSfx = LoadSound("resources/select.mp3");
+    buttonSfx = LoadSound("resources/button.mp3");
+    correctSfx = LoadSound("resources/correct.mp3");
+    wrongSfx = LoadSound("resources/wrong.mp3");
+    rainMusic = LoadMusicStream("resources/rain.mp3");
+    rainMusic.looping = true;
+    typeSfx = LoadSound("resources/type.mp3");       // <<< NOVO
+    victorySfx = LoadSound("resources/victory.mp3"); // <<< NOVO
 
     InitializeQuestions();
     LoadLeaderboard();
@@ -497,6 +524,16 @@ int main(void) {
     UnloadFont(fontMontserrat);
     UnloadImage(icon);
 
+    UnloadSound(selectSfx);
+    UnloadSound(buttonSfx);
+    UnloadSound(correctSfx);
+    UnloadSound(wrongSfx);
+    UnloadSound(typeSfx);    // <<< NOVO
+    UnloadSound(victorySfx); // <<< NOVO
+    UnloadMusicStream(rainMusic);
+
+    CloseAudioDevice();
+
     CloseWindow();
     return 0;
 }
@@ -507,6 +544,8 @@ int main(void) {
 void UpdateDrawFrame(void) {
     float deltaTime = GetFrameTime();
     float currentTime = GetTime();
+
+    UpdateMusicStream(rainMusic);
 
     if (IsKeyPressed(KEY_F11)) {
         ToggleFullscreen();
@@ -523,12 +562,30 @@ void UpdateDrawFrame(void) {
             Rectangle btnLeaderboard = { 691, 722, 538, 73 };
             Rectangle btnCredits = { 1612, 991, 259, 55 };
 
+            bool isMouseOverStart = CheckCollisionPointRec(mousePos, btnStart);
+            if (isMouseOverStart && !isHoveringBtnStart) PlaySound(selectSfx);
+            isHoveringBtnStart = isMouseOverStart;
+            
+            bool isMouseOverHowToPlay = CheckCollisionPointRec(mousePos, btnHowToPlay);
+            if (isMouseOverHowToPlay && !isHoveringBtnHowToPlay) PlaySound(selectSfx);
+            isHoveringBtnHowToPlay = isMouseOverHowToPlay;
+            
+            bool isMouseOverLeaderboard = CheckCollisionPointRec(mousePos, btnLeaderboard);
+            if (isMouseOverLeaderboard && !isHoveringBtnLeaderboard) PlaySound(selectSfx);
+            isHoveringBtnLeaderboard = isMouseOverLeaderboard;
+            
+            bool isMouseOverCredits = CheckCollisionPointRec(mousePos, btnCredits);
+            if (isMouseOverCredits && !isHoveringBtnCredits) PlaySound(selectSfx);
+            isHoveringBtnCredits = isMouseOverCredits;
+
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 if (CheckCollisionPointRec(mousePos, btnStart)) {
+                    PlaySound(buttonSfx);
+                    PlayMusicStream(rainMusic);
                     currentScreen = SCREEN_ENTER_NAME;
                     isWaterAnimating = true;
                     waterLevel = SCREEN_HEIGHT;
-                    waterRiseDelayTimer = 2.0f; // Define a espera de 2 segundos
+                    waterRiseDelayTimer = 2.0f;
                     playerName[0] = '\0';
                     nameCharCount = 0;
                     dropSpawnTimer = 0.0f;
@@ -536,14 +593,29 @@ void UpdateDrawFrame(void) {
                     InitRaindrops();
                     nextDropSpawnTime = GetRandomValue(DROP_SPAWN_INTERVAL_MIN * 100, DROP_SPAWN_INTERVAL_MAX * 100) / 100.0f;
                 }
-                if (CheckCollisionPointRec(mousePos, btnHowToPlay)) currentScreen = SCREEN_HOW_TO_PLAY;
-                if (CheckCollisionPointRec(mousePos, btnLeaderboard)) currentScreen = SCREEN_LEADERBOARD;
-                if (CheckCollisionPointRec(mousePos, btnCredits)) currentScreen = SCREEN_CREDITS;
+                if (CheckCollisionPointRec(mousePos, btnHowToPlay)) {
+                    PlaySound(buttonSfx);
+                    currentScreen = SCREEN_HOW_TO_PLAY;
+                }
+                if (CheckCollisionPointRec(mousePos, btnLeaderboard)) {
+                    PlaySound(buttonSfx);
+                    currentScreen = SCREEN_LEADERBOARD;
+                }
+                if (CheckCollisionPointRec(mousePos, btnCredits)) {
+                    PlaySound(buttonSfx);
+                    currentScreen = SCREEN_CREDITS;
+                }
             }
         } break;
         case SCREEN_HOW_TO_PLAY: case SCREEN_LEADERBOARD: case SCREEN_CREDITS: {
             Rectangle btnBack = { 787, 891, 347, 100 };
+
+            bool isMouseOverBack = CheckCollisionPointRec(mousePos, btnBack);
+            if (isMouseOverBack && !isHoveringBtnBack) PlaySound(selectSfx);
+            isHoveringBtnBack = isMouseOverBack;
+
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, btnBack)) {
+                PlaySound(buttonSfx);
                 currentScreen = SCREEN_MENU;
                 isWaterAnimating = false;
                 waterLevel = SCREEN_HEIGHT;
@@ -557,37 +629,44 @@ void UpdateDrawFrame(void) {
             int key = GetKeyPressed();
             if (currentScreen == SCREEN_ENTER_NAME) {
                 if ((key >= KEY_A && key <= KEY_Z) && (nameCharCount < MAX_NAME_LENGTH)) {
+                    PlaySound(typeSfx); // <<< NOVO
                     playerName[nameCharCount++] = (char)key;
                     playerName[nameCharCount] = '\0';
                 }
                 if (IsKeyPressed(KEY_BACKSPACE)) {
+                    PlaySound(typeSfx); // <<< NOVO
                     nameCharCount--;
                     if (nameCharCount < 0) nameCharCount = 0;
                     playerName[nameCharCount] = '\0';
                 }
                 if (IsKeyPressed(KEY_ENTER) && nameCharCount > 0) {
+                    PlaySound(buttonSfx);
                     StartGame();
                 }
             } else if (currentScreen == SCREEN_GAMEPLAY) {
                 questionTimer -= deltaTime;
                 if (questionTimer <= 0) {
+                    PlaySound(wrongSfx);
                     isAnswerCorrect = false;
                     selectedAnswer = -1;
                     currentScreen = SCREEN_SHOW_ANSWER;
                     answerTimer = 2.0f;
                 }
 
-                if (IsKeyPressed(KEY_A)) selectedAnswer = 0;
-                if (IsKeyPressed(KEY_B)) selectedAnswer = 1;
-                if (IsKeyPressed(KEY_C)) selectedAnswer = 2;
-                if (IsKeyPressed(KEY_D)) selectedAnswer = 3;
+                if (IsKeyPressed(KEY_A)) { selectedAnswer = 0; PlaySound(selectSfx); }
+                if (IsKeyPressed(KEY_B)) { selectedAnswer = 1; PlaySound(selectSfx); }
+                if (IsKeyPressed(KEY_C)) { selectedAnswer = 2; PlaySound(selectSfx); }
+                if (IsKeyPressed(KEY_D)) { selectedAnswer = 3; PlaySound(selectSfx); }
                 if (IsKeyPressed(KEY_ENTER) && selectedAnswer != -1) {
                     int qIndex = questionOrder[currentQuestionIndex];
                     isAnswerCorrect = (selectedAnswer == questions[qIndex].correctOption);
                     if (isAnswerCorrect) {
+                        PlaySound(correctSfx);
                         playerScore += questions[qIndex].points;
                         pointsGainedNotification = questions[qIndex].points;
                         notificationTimer = 2.0f;
+                    } else {
+                        PlaySound(wrongSfx);
                     }
                     currentScreen = SCREEN_SHOW_ANSWER;
                     answerTimer = 2.0f;
@@ -607,6 +686,8 @@ void UpdateDrawFrame(void) {
                 }
             } else if (currentScreen == SCREEN_GAME_OVER) {
                  if (IsKeyPressed(KEY_ENTER)) {
+                    PlaySound(victorySfx); // <<< NOVO
+                    StopMusicStream(rainMusic); // <<< ALTERADO: Para a música aqui
                     currentScreen = SCREEN_LEADERBOARD;
                     isWaterAnimating = false;
                     waterLevel = SCREEN_HEIGHT;
@@ -618,18 +699,15 @@ void UpdateDrawFrame(void) {
     }
 
     if (isWaterAnimating) {
-        // Primeiro, contamos o tempo de espera
         if (waterRiseDelayTimer > 0) {
             waterRiseDelayTimer -= deltaTime;
         }
 
-        // A água SÓ SOBE se o tempo de espera tiver acabado
         if (waterRiseDelayTimer <= 0 && waterLevel > TARGET_WATER_LEVEL) {
             waterLevel -= WATER_RISE_SPEED * deltaTime;
             if (waterLevel < TARGET_WATER_LEVEL) waterLevel = TARGET_WATER_LEVEL;
         }
 
-        // O resto da animação (ondas, chuva, etc.) continua funcionando normalmente
         waveOffset += waveSpeed * deltaTime;
         if (waveOffset > SCREEN_WIDTH * 2) waveOffset = 0;
 
@@ -712,10 +790,8 @@ void UpdateDrawFrame(void) {
             }
         } break;
         case SCREEN_ENTER_NAME: {
-            // A tela de fundo da água é desenhada primeiro
             if (isWaterAnimating) DrawWaterAndRain(currentTime);
             
-            // Textos são desenhados por cima da água
             const char* title = "Tudo pronto para comecar!";
             const char* subtitle = "Digite suas iniciais (3 letras):";
             const char* hint = "Pressione ENTER para iniciar o quiz";
