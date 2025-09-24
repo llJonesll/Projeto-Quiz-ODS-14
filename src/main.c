@@ -122,6 +122,7 @@ static Texture2D texQuestion;
 static Texture2D texHowToPlay;
 static Texture2D texLeaderboard;
 static Texture2D texCredits;
+static Texture2D texLogo;
 static Font fontMontserrat;
 
 // Variáveis para controlar a animação da água
@@ -462,6 +463,9 @@ void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float f
 int main(void) {
     srand(time(NULL));
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Quiz - Navegando pela ODS 14");
+    Image icon = LoadImage("resources/icon.png"); // Carrega a imagem do arquivo
+    SetWindowIcon(icon);                     
+
     SetTargetFPS(60);
 
     texMenu = LoadTexture("resources/tela_menu.png");
@@ -469,6 +473,7 @@ int main(void) {
     texHowToPlay = LoadTexture("resources/tela_comojogar.png");
     texLeaderboard = LoadTexture("resources/tela_leaderboard.png");
     texCredits = LoadTexture("resources/tela_creditos.png");
+    texLogo = LoadTexture("resources/logo.png");
 
     // Carrega a fonte em alta qualidade para evitar pixelização
     fontMontserrat = LoadFontEx("resources/montserrat.ttf", 256, NULL, 250);
@@ -488,7 +493,9 @@ int main(void) {
     UnloadTexture(texHowToPlay);
     UnloadTexture(texLeaderboard);
     UnloadTexture(texCredits);
+    UnloadTexture(texLogo);
     UnloadFont(fontMontserrat);
+    UnloadImage(icon);
 
     CloseWindow();
     return 0;
@@ -689,19 +696,19 @@ void UpdateDrawFrame(void) {
             DrawTexture(texLeaderboard, 0, 0, WHITE);
             Rectangle btnBack = { 820, 911, 280, 70 };
             if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE);
-            int startY = 482;
-            int stepY = 78;
-            int nameCenterX = 1010;
-            int scoreX = 1180;
-            int fontSize = 50;
+            int startY = 420;
+            int stepY = 49;
+            int nameCenterX = 958;
+            int scoreX = 1120;
+            int fontSize = 35;
             float spacing = 2.0f;
             for (int i = 0; i < LEADERBOARD_SIZE; i++) {
                 const char* nameText = leaderboard[i].name;
                 Vector2 nameTextSize = MeasureTextEx(fontMontserrat, nameText, fontSize, spacing);
-                DrawTextEx(fontMontserrat, nameText, (Vector2){nameCenterX - (nameTextSize.x / 2), startY + (i * stepY)}, fontSize, spacing, DARKBLUE);
+                DrawTextEx(fontMontserrat, nameText, (Vector2){nameCenterX - (nameTextSize.x / 2), startY + (i * stepY)}, fontSize, spacing, BLACK);
                 
-                const char* scoreText = TextFormat("%05d", leaderboard[i].score);
-                DrawTextEx(fontMontserrat, scoreText, (Vector2){scoreX, startY + (i * stepY)}, fontSize, spacing, DARKBLUE);
+                const char* scoreText = TextFormat("%03d", leaderboard[i].score);
+                DrawTextEx(fontMontserrat, scoreText, (Vector2){scoreX, startY + (i * stepY)}, fontSize, spacing, BLACK);
             }
         } break;
         case SCREEN_ENTER_NAME: {
@@ -795,7 +802,7 @@ void UpdateDrawFrame(void) {
                 case HARD: difficultyText = "DIFICIL"; difficultyColor = RED; break;
             }
             DrawTextEx(fontMontserrat, difficultyText, (Vector2){40, 85}, 30, 2.0f, difficultyColor);
-            
+            DrawTexture(texLogo, 0, 0, WHITE);
             const char* scoreText = TextFormat("Pontos: %03d", playerScore);
             DrawTextEx(fontMontserrat, scoreText, (Vector2){1650, 30}, 40, 2.0f, DARKBLUE);
 
