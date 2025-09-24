@@ -2,16 +2,14 @@
  * @file quiz_ods14.c
  * @author Gemini, com base no protótipo de Prof. Dr. David Buzatto
  * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
- * @version 2.6
+ * @version 2.8
  * @date 2025-09-24
  *
  * @copyright Copyright (c) 2025
  *
- * @note Mudanças da v2.6:
- * - Implementada pontuação diferenciada por dificuldade (Fácil: 10, Média: 25, Difícil: 50).
- * - Adicionada a exibição da dificuldade da pergunta (FÁCIL, MÉDIA, DIFÍCIL) com cores.
- * - Adicionada uma notificação visual de "+X PONTOS" que aparece por 2 segundos ao acertar
- * uma questão, com efeito de fade-out.
+ * @note Mudanças da v2.8:
+ * - Adicionado um atraso (delay) de 2 segundos antes da animação de subida da água começar,
+ * permitindo que o jogador leia a tela de "Digite suas iniciais" com calma.
  */
 
 #include "raylib/raylib.h"
@@ -38,16 +36,16 @@
 #define QUESTION_TIME 15.0f
 
 // Definições para as ondulações na água
-#define MAX_DROPS 60
-#define DROP_SPAWN_INTERVAL_MIN 0.1f
-#define DROP_SPAWN_INTERVAL_MAX 0.3f
-#define DROP_LIFETIME 1.5f
-#define DROP_AMPLITUDE_MAX 8.0f
+#define MAX_DROPS 3000
+#define DROP_SPAWN_INTERVAL_MIN 0.0f
+#define DROP_SPAWN_INTERVAL_MAX 0.1f
+#define DROP_LIFETIME 1.3f
+#define DROP_AMPLITUDE_MAX 9.0f
 #define DROP_WAVE_SPEED 250.0f
-#define DROP_WAVE_FREQUENCY 0.08f
+#define DROP_WAVE_FREQUENCY 0.1f
 
 // Definições para as gotas de chuva visuais
-#define MAX_RAINDROPS 500
+#define MAX_RAINDROPS 3000
 #define RAINDROP_SPEED_MIN 300
 #define RAINDROP_SPEED_MAX 600
 #define RAINDROP_LENGTH_MIN 15
@@ -124,6 +122,7 @@ static Texture2D texQuestion;
 static Texture2D texHowToPlay;
 static Texture2D texLeaderboard;
 static Texture2D texCredits;
+static Font fontMontserrat;
 
 // Variáveis para controlar a animação da água
 static float waterLevel;
@@ -145,9 +144,12 @@ static float mouseSplashCooldown = 0.0f;
 
 static float questionTimer;
 
-// <<< NOVAS: Variáveis para notificação de pontos >>>
+// Variáveis para notificação de pontos
 static int pointsGainedNotification = 0;
 static float notificationTimer = 0.0f;
+
+// Timer para a espera da subida da água
+static float waterRiseDelayTimer = 0.0f;
 
 
 //---------------------------------------------
@@ -166,7 +168,7 @@ void InitRaindrops(void);
 void UpdateRaindrops(float deltaTime);
 void DrawWaterAndRain(float currentTime);
 
-void DrawTextWrappedCentered(const char *text, Rectangle rec, float fontSize, float spacing, Color color);
+void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float fontSize, float spacing, Color color);
 
 
 //---------------------------------------------
@@ -208,6 +210,7 @@ void InitializeQuestions() {
     questions[27] = (Question){"A 'biomagnificacao' e um processo perigoso onde:", {"Toxinas se acumulam em concentracoes maiores ao longo da cadeia alimentar", "Organismos marinhos crescem a um tamanho anormal", "A biodiversidade de uma area aumenta rapidamente", "A quantidade de sal aumenta em um organismo"}, 0, HARD, 50};
     questions[28] = (Question){"Qual destes subsidios a pesca a ODS 14.6 busca eliminar?", {"Subsidios para combustivel de pequenos pescadores", "Subsidios que contribuem para a sobrepesca e a pesca ilegal", "Financiamento para pesquisas sobre a vida marinha", "Ajuda de custo para a seguranca dos pescadores"}, 1, HARD, 50};
     questions[29] = (Question){"A 'termoclina' e uma camada no oceano onde ocorre uma rapida mudanca de:", {"Salinidade", "Pressao", "Temperatura", "Visibilidade"}, 2, HARD, 50};
+
     for (int i = 0; i < TOTAL_QUESTIONS; i++) {
         switch (questions[i].difficulty) {
             case EASY:   easyQuestionIndices[easyCount++] = i;  break;
@@ -371,7 +374,7 @@ void InitRaindrops(void) {
 void UpdateRaindrops(float deltaTime) {
     for (int i = 0; i < MAX_RAINDROPS; i++) {
         raindrops[i].startPos.y += raindrops[i].speed * deltaTime;
-        if (raindrops[i].startPos.y > waterLevel) {
+        if (raindrops[i].startPos.y > waterLevel+20) {
             raindrops[i].startPos = (Vector2){ (float)GetRandomValue(0, SCREEN_WIDTH), (float)GetRandomValue(-400, -50) };
         }
     }
@@ -380,10 +383,10 @@ void UpdateRaindrops(float deltaTime) {
 void DrawWaterAndRain(float currentTime) {
     for (int i = 0; i < MAX_RAINDROPS; i++) {
         Vector2 endPos = { raindrops[i].startPos.x, raindrops[i].startPos.y + raindrops[i].length };
-        if (endPos.y > waterLevel) {
-            endPos.y = waterLevel;
+        if (endPos.y > waterLevel+20) {
+            endPos.y = waterLevel+20;
         }
-        if (raindrops[i].startPos.y < waterLevel) {
+        if (raindrops[i].startPos.y < waterLevel+20) {
             DrawLineEx(raindrops[i].startPos, endPos, 2.0f, (Color){ 200, 230, 255, 180 });
         }
     }
@@ -407,7 +410,7 @@ void DrawWaterAndRain(float currentTime) {
     }
 }
 
-void DrawTextWrappedCentered(const char *text, Rectangle rec, float fontSize, float spacing, Color color) {
+void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float fontSize, float textSpacing, Color color) {
     char textToProcess[1024];
     strcpy(textToProcess, text);
 
@@ -426,7 +429,7 @@ void DrawTextWrappedCentered(const char *text, Rectangle rec, float fontSize, fl
         if (strlen(currentLine) > 0) strcat(testLine, " ");
         strcat(testLine, word);
 
-        if (MeasureText(testLine, fontSize) > rec.width) {
+        if (MeasureTextEx(font, testLine, fontSize, textSpacing).x > rec.width) {
             strcpy(lines[lineCount], currentLine);
             lineCount++;
             
@@ -441,14 +444,14 @@ void DrawTextWrappedCentered(const char *text, Rectangle rec, float fontSize, fl
     lineCount++;
     MemFree(textCopy);
 
-    float totalTextHeight = lineCount * fontSize + (lineCount - 1) * spacing;
+    float totalTextHeight = lineCount * fontSize + (lineCount - 1) * textSpacing;
     
     float startY = rec.y + (rec.height - totalTextHeight) / 2;
 
     for (int i = 0; i < lineCount; i++) {
-        float lineWidth = MeasureText(lines[i], fontSize);
+        float lineWidth = MeasureTextEx(font, lines[i], fontSize, textSpacing).x;
         float startX = rec.x + (rec.width - lineWidth) / 2;
-        DrawText(lines[i], startX, startY + i * (fontSize + spacing), fontSize, color);
+        DrawTextEx(font, lines[i], (Vector2){startX, startY + i * (fontSize + textSpacing)}, fontSize, textSpacing, color);
     }
 }
 
@@ -467,6 +470,9 @@ int main(void) {
     texLeaderboard = LoadTexture("resources/tela_leaderboard.png");
     texCredits = LoadTexture("resources/tela_creditos.png");
 
+    // Carrega a fonte em alta qualidade para evitar pixelização
+    fontMontserrat = LoadFontEx("resources/montserrat.ttf", 256, NULL, 250);
+
     InitializeQuestions();
     LoadLeaderboard();
     waterLevel = SCREEN_HEIGHT;
@@ -482,6 +488,7 @@ int main(void) {
     UnloadTexture(texHowToPlay);
     UnloadTexture(texLeaderboard);
     UnloadTexture(texCredits);
+    UnloadFont(fontMontserrat);
 
     CloseWindow();
     return 0;
@@ -496,7 +503,9 @@ void UpdateDrawFrame(void) {
 
     if (IsKeyPressed(KEY_F11)) {
         ToggleFullscreen();
-        ShowCursor();
+        if (IsWindowFullscreen()) {
+            ShowCursor();
+        }
     }
 
     Vector2 mousePos = GetMousePosition();
@@ -512,6 +521,7 @@ void UpdateDrawFrame(void) {
                     currentScreen = SCREEN_ENTER_NAME;
                     isWaterAnimating = true;
                     waterLevel = SCREEN_HEIGHT;
+                    waterRiseDelayTimer = 2.0f; // Define a espera de 2 segundos
                     playerName[0] = '\0';
                     nameCharCount = 0;
                     dropSpawnTimer = 0.0f;
@@ -569,9 +579,8 @@ void UpdateDrawFrame(void) {
                     isAnswerCorrect = (selectedAnswer == questions[qIndex].correctOption);
                     if (isAnswerCorrect) {
                         playerScore += questions[qIndex].points;
-                        // <<< NOVO: Ativa a notificação de pontos >>>
                         pointsGainedNotification = questions[qIndex].points;
-                        notificationTimer = 2.0f; // Duração de 2 segundos
+                        notificationTimer = 2.0f;
                     }
                     currentScreen = SCREEN_SHOW_ANSWER;
                     answerTimer = 2.0f;
@@ -602,10 +611,18 @@ void UpdateDrawFrame(void) {
     }
 
     if (isWaterAnimating) {
-        if (waterLevel > TARGET_WATER_LEVEL) {
+        // Primeiro, contamos o tempo de espera
+        if (waterRiseDelayTimer > 0) {
+            waterRiseDelayTimer -= deltaTime;
+        }
+
+        // A água SÓ SOBE se o tempo de espera tiver acabado
+        if (waterRiseDelayTimer <= 0 && waterLevel > TARGET_WATER_LEVEL) {
             waterLevel -= WATER_RISE_SPEED * deltaTime;
             if (waterLevel < TARGET_WATER_LEVEL) waterLevel = TARGET_WATER_LEVEL;
         }
+
+        // O resto da animação (ondas, chuva, etc.) continua funcionando normalmente
         waveOffset += waveSpeed * deltaTime;
         if (waveOffset > SCREEN_WIDTH * 2) waveOffset = 0;
 
@@ -625,11 +642,10 @@ void UpdateDrawFrame(void) {
         
         if (mouseSplashCooldown > 0) mouseSplashCooldown -= deltaTime;
 
-        // <<< NOVO: Lógica de atualização do timer da notificação >>>
         if (notificationTimer > 0) {
             notificationTimer -= deltaTime;
             if (notificationTimer <= 0) {
-                pointsGainedNotification = 0; // Desativa a notificação quando o tempo acaba
+                pointsGainedNotification = 0;
             }
         }
 
@@ -678,25 +694,38 @@ void UpdateDrawFrame(void) {
             int nameCenterX = 1010;
             int scoreX = 1180;
             int fontSize = 50;
+            float spacing = 2.0f;
             for (int i = 0; i < LEADERBOARD_SIZE; i++) {
                 const char* nameText = leaderboard[i].name;
-                int nameTextWidth = MeasureText(nameText, fontSize);
-                DrawText(nameText, nameCenterX - (nameTextWidth / 2), startY + (i * stepY), fontSize, DARKBLUE);
+                Vector2 nameTextSize = MeasureTextEx(fontMontserrat, nameText, fontSize, spacing);
+                DrawTextEx(fontMontserrat, nameText, (Vector2){nameCenterX - (nameTextSize.x / 2), startY + (i * stepY)}, fontSize, spacing, DARKBLUE);
+                
                 const char* scoreText = TextFormat("%05d", leaderboard[i].score);
-                DrawText(scoreText, scoreX, startY + (i * stepY), fontSize, DARKBLUE);
+                DrawTextEx(fontMontserrat, scoreText, (Vector2){scoreX, startY + (i * stepY)}, fontSize, spacing, DARKBLUE);
             }
         } break;
         case SCREEN_ENTER_NAME: {
+            // A tela de fundo da água é desenhada primeiro
             if (isWaterAnimating) DrawWaterAndRain(currentTime);
-            DrawText("Tudo pronto para comecar!", SCREEN_WIDTH/2 - MeasureText("Tudo pronto para comecar!", 60)/2, 300, 60, RAYWHITE);
-            DrawText("Digite suas iniciais (3 letras):", SCREEN_WIDTH/2 - MeasureText("Digite suas iniciais (3 letras):", 40)/2, 500, 40, LIGHTGRAY);
+            
+            // Textos são desenhados por cima da água
+            const char* title = "Tudo pronto para comecar!";
+            const char* subtitle = "Digite suas iniciais (3 letras):";
+            const char* hint = "Pressione ENTER para iniciar o quiz";
+
+            DrawTextEx(fontMontserrat, title, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, title, 60, 2).x/2, 300}, 60, 2, RAYWHITE);
+            DrawTextEx(fontMontserrat, subtitle, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, subtitle, 40, 2).x/2, 500}, 40, 2, LIGHTGRAY);
+            
             DrawRectangle(SCREEN_WIDTH/2 - 150, 560, 300, 80, RAYWHITE);
             DrawRectangleLines(SCREEN_WIDTH/2 - 150, 560, 300, 80, DARKGRAY);
-            DrawText(playerName, SCREEN_WIDTH/2 - MeasureText(playerName, 60)/2, 570, 60, DARKBLUE);
+            
+            DrawTextEx(fontMontserrat, playerName, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, playerName, 60, 2).x/2, 570}, 60, 2, DARKBLUE);
+            
             if (nameCharCount < MAX_NAME_LENGTH && ((int)(GetTime()*2.0f)) % 2 == 0) {
-                DrawText("_", SCREEN_WIDTH/2 - MeasureText(playerName, 60)/2 + MeasureText(playerName, 60), 570, 60, DARKBLUE);
+                Vector2 textSize = MeasureTextEx(fontMontserrat, playerName, 60, 2);
+                DrawTextEx(fontMontserrat, "_", (Vector2){SCREEN_WIDTH/2 - textSize.x/2 + textSize.x, 570}, 60, 2, DARKBLUE);
             }
-            DrawText("Pressione ENTER para iniciar o quiz", SCREEN_WIDTH/2 - MeasureText("Pressione ENTER para iniciar o quiz", 30)/2, 700, 30, LIGHTGRAY);
+            DrawTextEx(fontMontserrat, hint, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY);
         } break;
         case SCREEN_GAMEPLAY: case SCREEN_SHOW_ANSWER: {
             DrawTexture(texQuestion, 0, 0, WHITE);
@@ -721,7 +750,7 @@ void UpdateDrawFrame(void) {
             Question q = questions[qIndex];
             
             Rectangle questionRec = { 157, 243, 1595, 155 };
-            DrawTextWrappedCentered(q.questionText, questionRec, 40, 5, WHITE);
+            DrawTextWrappedCentered(fontMontserrat, q.questionText, questionRec, 40, 5, WHITE);
             
             Rectangle optionTextRects[4] = {
                 {215, 505, 500, 72},
@@ -751,14 +780,12 @@ void UpdateDrawFrame(void) {
                     }
                 }
 
-                DrawText(optionLetters[i], letterPositions[i].x, letterPositions[i].y, 73, letterColor);
-                DrawTextWrappedCentered(q.options[i], optionTextRects[i], 36, 3, WHITE);
+                DrawTextEx(fontMontserrat, optionLetters[i], letterPositions[i], 73, 2.0f, letterColor);
+                DrawTextWrappedCentered(fontMontserrat, q.options[i], optionTextRects[i], 36, 3, WHITE);
             }
             
-            // <<< NOVO: Desenho da exibição de dificuldade e notificação de pontos >>>
             const char* questionTextStr = TextFormat("Questao: %02d/%d", currentQuestionIndex + 1, QUIZ_QUESTIONS);
-            int questionTextWidth = MeasureText(questionTextStr, 40);
-            DrawText(questionTextStr, 40, 30, 40, DARKBLUE);
+            DrawTextEx(fontMontserrat, questionTextStr, (Vector2){40, 30}, 40, 2.0f, DARKBLUE);
 
             const char* difficultyText;
             Color difficultyColor;
@@ -767,25 +794,31 @@ void UpdateDrawFrame(void) {
                 case MEDIUM: difficultyText = "MEDIA"; difficultyColor = YELLOW; break;
                 case HARD: difficultyText = "DIFICIL"; difficultyColor = RED; break;
             }
-            DrawText(difficultyText, 40, 85, 30, difficultyColor);
+            DrawTextEx(fontMontserrat, difficultyText, (Vector2){40, 85}, 30, 2.0f, difficultyColor);
             
-            DrawText(TextFormat("Pontos: %03d", playerScore), 1650, 30, 40, DARKBLUE);
+            const char* scoreText = TextFormat("Pontos: %03d", playerScore);
+            DrawTextEx(fontMontserrat, scoreText, (Vector2){1650, 30}, 40, 2.0f, DARKBLUE);
 
-            // Desenha a notificação de pontos ganhos com fade-out
             if (notificationTimer > 0) {
                 const char* notificationText = TextFormat("+%d PONTOS", pointsGainedNotification);
-                int notificationTextWidth = MeasureText(notificationText, 25);
-                float alpha = notificationTimer / 2.0f; // Fade out ao longo de 2 segundos
-                // Posição centralizada abaixo do placar
-                DrawText(notificationText, 1650 + (MeasureText(TextFormat("Pontos: %03d", playerScore), 40) - notificationTextWidth) / 2, 30 + 45, 25, Fade(GREEN, alpha));
+                Vector2 scoreTextSize = MeasureTextEx(fontMontserrat, scoreText, 40, 2.0f);
+                Vector2 notificationTextSize = MeasureTextEx(fontMontserrat, notificationText, 25, 2.0f);
+                float alpha = notificationTimer / 2.0f;
+                DrawTextEx(fontMontserrat, notificationText, (Vector2){1650 + (scoreTextSize.x - notificationTextSize.x) / 2, 30 + 45}, 25, 2.0f, Fade(GREEN, alpha));
             }
 
         } break;
         case SCREEN_GAME_OVER: {
             if (isWaterAnimating) DrawWaterAndRain(currentTime);
-            DrawText("FIM DE JOGO!", SCREEN_WIDTH/2 - MeasureText("FIM DE JOGO!", 80)/2, 350, 80, RAYWHITE);
-            DrawText(TextFormat("Sua pontuacao final: %d", playerScore), SCREEN_WIDTH/2 - MeasureText(TextFormat("Sua pontuacao final: %d", playerScore), 50)/2, 500, 50, RAYWHITE);
-            DrawText("Pressione ENTER para ver o placar", SCREEN_WIDTH/2 - MeasureText("Pressione ENTER para ver o placar", 30)/2, 700, 30, LIGHTGRAY);
+            
+            const char* title = "FIM DE JOGO!";
+            const char* scoreText = TextFormat("Sua pontuacao final: %d", playerScore);
+            const char* hint = "Pressione ENTER para ver o placar";
+            
+            DrawTextEx(fontMontserrat, title, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, title, 80, 2).x/2, 350}, 80, 2, RAYWHITE);
+            DrawTextEx(fontMontserrat, scoreText, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, scoreText, 50, 2).x/2, 500}, 50, 2, RAYWHITE);
+            DrawTextEx(fontMontserrat, hint, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY);
+
         } break;
         default: break;
     }
