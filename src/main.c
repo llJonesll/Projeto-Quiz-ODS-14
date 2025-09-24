@@ -2,14 +2,14 @@
  * @file quiz_ods14.c
  * @author Gemini, com base no protótipo de Prof. Dr. David Buzatto
  * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
- * @version 1.4
+ * @version 1.9
  * @date 2025-09-24
  *
  * @copyright Copyright (c) 2025
  *
- * @note Mudanças da v1.4:
- * - Adicionada funcionalidade de tela cheia (fullscreen).
- * - O jogador pode pressionar F11 a qualquer momento para alternar.
+ * @note Mudanças da v1.9:
+ * - Corrigido erro de compilação ao desenhar a água.
+ * - Substituída a chamada incorreta `DrawPoly` pela lógica correta de desenhar a onda com triângulos.
  */
 
 #include "raylib/raylib.h"
@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <time.h> // Para embaralhar as perguntas
+#include <math.h> // Para a função sinf da onda
 
 //---------------------------------------------
 // Definições e Constantes
@@ -89,6 +90,17 @@ static Texture2D texHowToPlay;
 static Texture2D texLeaderboard;
 static Texture2D texCredits;
 
+// Variáveis para controlar a animação da água
+static float waterLevel;
+static bool isWaterAnimating = false;
+static const float WATER_RISE_SPEED = 100.0f;
+static const float TARGET_WATER_LEVEL = 150.0f;
+static float waveAmplitude = 15.0f;
+static float waveFrequency = 0.015f;
+static float waveSpeed = 80.0f;
+static float waveOffset = 0.0f;
+
+
 //---------------------------------------------
 // Protótipos de Funções
 //---------------------------------------------
@@ -100,7 +112,6 @@ void LoadLeaderboard(void);
 // Banco de Perguntas - ODS 14
 //---------------------------------------------
 void InitializeQuestions() {
-    // ... (O conteúdo desta função é o mesmo, sem alterações) ...
     questions[0] = (Question){"Qual e o objetivo principal da ODS 14?", {"Erradicar a fome", "Vida na agua", "Energia limpa", "Cidades sustentaveis"}, 1, EASY, 10};
     questions[1] = (Question){"Qual destes e a maior ameaca direta aos recifes de coral?", {"Turismo excessivo", "Branqueamento por aquecimento", "Pesca com lanca", "Construcao de portos"}, 1, EASY, 10};
     questions[2] = (Question){"O que significa 'sobrepesca'?", {"Pescar a mais do que o permitido", "Pescar mais rapido que a reposicao", "Usar redes muito grandes", "Pescar fora da temporada"}, 1, EASY, 10};
@@ -134,9 +145,9 @@ void InitializeQuestions() {
 
     for (int i = 0; i < TOTAL_QUESTIONS; i++) {
         switch (questions[i].difficulty) {
-            case EASY:   easyQuestionIndices[easyCount++] = i;   break;
+            case EASY:   easyQuestionIndices[easyCount++] = i;  break;
             case MEDIUM: mediumQuestionIndices[mediumCount++] = i; break;
-            case HARD:   hardQuestionIndices[hardCount++] = i;   break;
+            case HARD:   hardQuestionIndices[hardCount++] = i;  break;
         }
     }
 }
@@ -253,6 +264,7 @@ int main(void) {
 
     InitializeQuestions();
     LoadLeaderboard();
+    waterLevel = SCREEN_HEIGHT;
 
     while (!WindowShouldClose()) {
         UpdateDrawFrame();
@@ -272,17 +284,13 @@ int main(void) {
 // Loop Principal de Atualização e Desenho
 //---------------------------------------------
 void UpdateDrawFrame(void) {
-    // <<< NOVO: Verificação para alternar tela cheia >>>
-    // Pressione F11 para entrar ou sair do modo de tela cheia
     if (IsKeyPressed(KEY_F11)) {
         ToggleFullscreen();
     }
 
     Vector2 mousePos = GetMousePosition();
-    // --- Lógica de Atualização (Update) ---
     switch (currentScreen) {
         case SCREEN_MENU: {
-
             Rectangle btnStart = { 691, 554, 538, 73 };
             Rectangle btnHowToPlay = { 691, 638, 538, 73 };
             Rectangle btnLeaderboard = { 691, 722, 538, 73 };
@@ -290,8 +298,11 @@ void UpdateDrawFrame(void) {
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 if (CheckCollisionPointRec(mousePos, btnStart)) {
-                    playerName[0] = '\0'; nameCharCount = 0;
                     currentScreen = SCREEN_ENTER_NAME;
+                    isWaterAnimating = true;
+                    waterLevel = SCREEN_HEIGHT;
+                    playerName[0] = '\0';
+                    nameCharCount = 0;
                 }
                 if (CheckCollisionPointRec(mousePos, btnHowToPlay)) currentScreen = SCREEN_HOW_TO_PLAY;
                 if (CheckCollisionPointRec(mousePos, btnLeaderboard)) currentScreen = SCREEN_LEADERBOARD;
@@ -299,10 +310,13 @@ void UpdateDrawFrame(void) {
             }
         } break;
         case SCREEN_HOW_TO_PLAY: case SCREEN_LEADERBOARD: case SCREEN_CREDITS: {
-              Rectangle btnBack = { 787, 891, 347, 100 };
-              if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, btnBack)) {
-                  currentScreen = SCREEN_MENU;
-              }
+            Rectangle btnBack = { 787, 891, 347, 100 };
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, btnBack)) {
+                currentScreen = SCREEN_MENU;
+                isWaterAnimating = false;
+                waterLevel = SCREEN_HEIGHT;
+                waveOffset = 0.0f;
+            }
         } break;
         case SCREEN_ENTER_NAME: {
             int key = GetKeyPressed();
@@ -327,7 +341,9 @@ void UpdateDrawFrame(void) {
             if (IsKeyPressed(KEY_ENTER) && selectedAnswer != -1) {
                 int qIndex = questionOrder[currentQuestionIndex];
                 isAnswerCorrect = (selectedAnswer == questions[qIndex].correctOption);
-                if (isAnswerCorrect) playerScore += questions[qIndex].points;
+                if (isAnswerCorrect) {
+                    playerScore += questions[qIndex].points;
+                }
                 currentScreen = SCREEN_SHOW_ANSWER;
                 answerTimer = 2.0f;
             }
@@ -353,15 +369,70 @@ void UpdateDrawFrame(void) {
         default: break;
     }
 
-    // --- Lógica de Desenho (Draw) ---
+    if (isWaterAnimating) {
+        if (waterLevel > TARGET_WATER_LEVEL) {
+            waterLevel -= WATER_RISE_SPEED * GetFrameTime();
+            if (waterLevel < TARGET_WATER_LEVEL) waterLevel = TARGET_WATER_LEVEL;
+        }
+        waveOffset += waveSpeed * GetFrameTime();
+        if (waveOffset > SCREEN_WIDTH * 2) waveOffset = 0;
+    }
+
     BeginDrawing();
     ClearBackground(RAYWHITE);
+
+    if (isWaterAnimating) {
+        // <<< CORRIGIDO: Substituição do DrawPoly pela lógica de triângulos >>>
+        // Esta nova lógica desenha a água como uma série de quadriláteros (2 triângulos cada)
+        for (int x = 0; x < SCREEN_WIDTH; x += 10) // Desenha a onda em segmentos de 10 pixels
+        {
+            // Ponto 1 (superior esquerdo do segmento)
+            float yOffset1 = sinf((x + waveOffset) * waveFrequency) * waveAmplitude;
+            Vector2 p1 = { (float)x, waterLevel + yOffset1 };
+
+            // Ponto 2 (superior direito do segmento)
+            float yOffset2 = sinf((x + 10 + waveOffset) * waveFrequency) * waveAmplitude;
+            Vector2 p2 = { (float)x + 10, waterLevel + yOffset2 };
+            
+            // Ponto 3 (inferior esquerdo do segmento)
+            Vector2 p3 = { (float)x, SCREEN_HEIGHT };
+            
+            // Ponto 4 (inferior direito do segmento)
+            Vector2 p4 = { (float)x + 10, SCREEN_HEIGHT };
+            
+            // Desenha o quadrilátero com dois triângulos
+            DrawTriangle(p1, p3, p2, (Color){ 20, 80, 180, 200 });
+            DrawTriangle(p2, p3, p4, (Color){ 20, 80, 180, 200 });
+        }
+    }
+
     switch (currentScreen) {
-        case SCREEN_MENU: DrawTexture(texMenu, 0, 0, WHITE); break;
-        case SCREEN_HOW_TO_PLAY: DrawTexture(texHowToPlay, 0, 0, WHITE); break;
-        case SCREEN_CREDITS: DrawTexture(texCredits, 0, 0, WHITE); break;
+        case SCREEN_MENU: {
+            DrawTexture(texMenu, 0, 0, WHITE);
+            Rectangle btnStart = { 691, 554, 538, 73 };
+            Rectangle btnHowToPlay = { 691, 638, 538, 80 };
+            Rectangle btnLeaderboard = { 691, 722, 538, 73 };
+            Rectangle btnCredits = { 1607, 991, 270, 55 };
+
+            if (CheckCollisionPointRec(mousePos, btnStart)) DrawRectangleLinesEx(btnStart, 4, BLUE);
+            if (CheckCollisionPointRec(mousePos, btnHowToPlay)) DrawRectangleLinesEx(btnHowToPlay, 4, BLUE);
+            if (CheckCollisionPointRec(mousePos, btnLeaderboard)) DrawRectangleLinesEx(btnLeaderboard, 4, BLUE);
+            if (CheckCollisionPointRec(mousePos, btnCredits)) DrawRectangleLinesEx(btnCredits, 4, BLUE);
+        } break;
+        case SCREEN_HOW_TO_PLAY: {
+            DrawTexture(texHowToPlay, 0, 0, WHITE);
+            Rectangle btnBack = { 820, 911, 280, 70 };
+            if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE);
+        } break;
+        case SCREEN_CREDITS: {
+            DrawTexture(texCredits, 0, 0, WHITE);
+            Rectangle btnBack = { 820, 911, 280, 70 };
+            if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE);
+        } break;
         case SCREEN_LEADERBOARD: {
             DrawTexture(texLeaderboard, 0, 0, WHITE);
+            Rectangle btnBack = { 820, 911, 280, 70 };
+            if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE);
             int startY = 482;
             int stepY = 78;
             int nameCenterX = 1010;
@@ -376,14 +447,13 @@ void UpdateDrawFrame(void) {
             }
         } break;
         case SCREEN_ENTER_NAME: {
-            ClearBackground(DARKBLUE);
             DrawText("Tudo pronto para comecar!", SCREEN_WIDTH/2 - MeasureText("Tudo pronto para comecar!", 60)/2, 300, 60, RAYWHITE);
             DrawText("Digite suas iniciais (3 letras):", SCREEN_WIDTH/2 - MeasureText("Digite suas iniciais (3 letras):", 40)/2, 500, 40, LIGHTGRAY);
             DrawRectangle(SCREEN_WIDTH/2 - 150, 560, 300, 80, RAYWHITE);
             DrawRectangleLines(SCREEN_WIDTH/2 - 150, 560, 300, 80, DARKGRAY);
             DrawText(playerName, SCREEN_WIDTH/2 - MeasureText(playerName, 60)/2, 570, 60, DARKBLUE);
             if (nameCharCount < MAX_NAME_LENGTH && ((int)(GetTime()*2.0f)) % 2 == 0) {
-                 DrawText("_", SCREEN_WIDTH/2 - MeasureText(playerName, 60)/2 + MeasureText(playerName, 60), 570, 60, DARKBLUE);
+                DrawText("_", SCREEN_WIDTH/2 - MeasureText(playerName, 60)/2 + MeasureText(playerName, 60), 570, 60, DARKBLUE);
             }
             DrawText("Pressione ENTER para iniciar o quiz", SCREEN_WIDTH/2 - MeasureText("Pressione ENTER para iniciar o quiz", 30)/2, 700, 30, LIGHTGRAY);
         } break;
@@ -401,7 +471,7 @@ void UpdateDrawFrame(void) {
                 {354, 530, 500, 95}, {1064, 530, 500, 95},
                 {354, 710, 500, 95}, {1064, 710, 500, 95}
             };
-            if (selectedAnswer != -1) DrawRectangleLinesEx(optRects[selectedAnswer], 5, YELLOW);
+            if (selectedAnswer != -1) DrawRectangleLinesEx(optRects[selectedAnswer], 5, BLUE);
             if (currentScreen == SCREEN_SHOW_ANSWER) {
                 DrawRectangleRec(optRects[q.correctOption], (Color){0, 228, 48, 100});
                 if (!isAnswerCorrect) DrawRectangleRec(optRects[selectedAnswer], (Color){255, 0, 0, 100});
@@ -410,7 +480,6 @@ void UpdateDrawFrame(void) {
             DrawText(TextFormat("Pontos: %03d", playerScore), 1650, 30, 40, DARKBLUE);
         } break;
         case SCREEN_GAME_OVER: {
-            ClearBackground(DARKBLUE);
             DrawText("FIM DE JOGO!", SCREEN_WIDTH/2 - MeasureText("FIM DE JOGO!", 80)/2, 350, 80, RAYWHITE);
             DrawText(TextFormat("Sua pontuacao final: %d", playerScore), SCREEN_WIDTH/2 - MeasureText(TextFormat("Sua pontuacao final: %d", playerScore), 50)/2, 500, 50, RAYWHITE);
             DrawText("Pressione ENTER para ver o placar", SCREEN_WIDTH/2 - MeasureText("Pressione ENTER para ver o placar", 30)/2, 700, 30, LIGHTGRAY);
