@@ -2,16 +2,18 @@
  * @file quiz_ods14.c
  * @author Gemini, com base no protótipo de Prof. Dr. David Buzatto
  * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
- * @version 3.7
+ * @version 3.8
  * @date 2025-09-25
  *
  * @copyright Copyright (c) 2025
  *
- * @note Mudanças da v3.7:
- * - Atualizadas as coordenadas do slider de volume para o alinhamento correto.
- * - Aumentada a área de clique ("hitbox") do ícone de volume para 80x80 pixels.
- * - Aumentada e centralizada a "hitbox" da barra do slider para facilitar
- * a detecção do clique e o início do arrasto em toda a sua área vertical.
+ * @note Mudanças da v3.8:
+ * - Implementado um music player completo com controles de play/pause, next/previous e volume.
+ * - Adicionada uma playlist com 6 músicas que tocam em ordem aleatória (após a principal)
+ * e sem repetição até que todas tenham tocado.
+ * - Atualizados todos os caminhos de carregamento de recursos (imagens, sfx, músicas)
+ * para uma nova estrutura de subpastas.
+ * - O som de chuva foi reclassificado como efeito sonoro (carregado de /sfx).
  */
 
 #include "raylib/raylib.h"
@@ -34,6 +36,7 @@
 #define NUM_HARD 4
 #define LEADERBOARD_SIZE 6
 #define MAX_NAME_LENGTH 3
+#define TOTAL_MUSICS 6 // <<< NOVO
 
 #define QUESTION_TIME 15.0f
 
@@ -154,9 +157,8 @@ static float notificationTimer = 0.0f;
 // Timer para a espera da subida da água
 static float waterRiseDelayTimer = 0.0f;
 
-// Variáveis de Áudio
-static Music bgMusic;
-static Music rainMusic;
+// Variáveis de Áudio e Efeitos
+static Music rainMusic; // Som de chuva, agora tratado como SFX
 static Sound selectSfx;
 static Sound buttonSfx;
 static Sound correctSfx;
@@ -164,14 +166,16 @@ static Sound wrongSfx;
 static Sound typeSfx;
 static Sound victorySfx;
 
-// Variáveis de controle de volume
-static Texture2D texMute;
-static Texture2D texUnmute;
+// <<< NOVO: Sistema do Music Player >>>
+static Music musicPlaylist[TOTAL_MUSICS];
+static int playlistOrder[TOTAL_MUSICS - 1]; // Ordem aleatória para as músicas 2 a 6
+static int currentMusicIndex = 0;
+static int currentPlaylistPosition = -1; // -1: música principal, 0-4: posição na playlist aleatória
+static bool isMusicPaused = false;
+static bool showMusicPlayer = false;
 static float musicVolume = 0.5f;
-static bool showVolumeSlider = false;
-static Rectangle volumeIconRec;
-static Rectangle volumeSliderRec;
 static bool isDraggingVolume = false;
+static Texture2D texMusicIcon, texMute, texUnmute, texPause, texPlay, texNext, texPrevious, texClose;
 
 // Variáveis para controlar som de hover
 static bool isHoveringBtnStart = false;
@@ -192,6 +196,9 @@ static float menuNotificationTimer = 0.0f;
 void UpdateDrawFrame(void);
 void InitializeQuestions(void);
 void LoadLeaderboard(void);
+void ShuffleIntArray(int *array, int size); // Já existia, mas agora é mais usada
+void PlayNextSong(void);
+void PlayPreviousSong(void);
 
 void InitDrops(void);
 void SpawnRandomDrop(void);
@@ -206,10 +213,9 @@ void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float f
 
 
 //---------------------------------------------
-// Banco de Perguntas - ODS 14
+// Banco de Perguntas - ODS 14 (Inalterado)
 //---------------------------------------------
 void InitializeQuestions() {
-    // Fáceis - 10 Pontos
     questions[0] = (Question){"Qual o principal objetivo da ODS 14: Vida na Agua?", {"Conservar e usar de forma sustentavel os oceanos e mares", "Aumentar a producao de peixes para alimentacao", "Promover o turismo em todas as areas costeiras", "Incentivar a extracao de petroleo no fundo do mar"}, 0, EASY, 10};
     questions[1] = (Question){"Qual material representa a maior parte do lixo encontrado nos oceanos?", {"Vidro", "Plastico", "Metal", "Papel"}, 1, EASY, 10};
     questions[2] = (Question){"O que causa o 'branqueamento' dos corais?", {"Excesso de peixes na regiao", "Sombras de barcos passando", "Aumento da temperatura da agua", "Falta de sal no mar"}, 2, EASY, 10};
@@ -220,8 +226,6 @@ void InitializeQuestions() {
     questions[7] = (Question){"O que e a 'sobrepesca'?", {"Pescar apenas peixes muito grandes", "Usar barcos de pesca muito rapidos", "Pescar durante a noite", "Capturar peixes mais rapido do que eles conseguem se reproduzir"}, 3, EASY, 10};
     questions[8] = (Question){"O derramamento de qual substancia causa grandes desastres ambientais, matando aves e peixes?", {"Petroleo", "Areia", "Sal", "Açucar"}, 0, EASY, 10};
     questions[9] = (Question){"Qual a principal funcao das Areas Marinhas Protegidas (AMPs)?", {"Servir como rota para navios cargueiros", "Proteger a vida marinha e os habitats", "Ser um local exclusivo para esportes aquaticos", "Area de testes para equipamentos militares"}, 1, EASY, 10};
-    
-    // Médias - 25 Pontos
     questions[10] = (Question){"Qual fenomeno e causado pela absorcao de CO2 da atmosfera pelos oceanos, prejudicando organismos com conchas?", {"Eutrofizacao", "Salinizacao", "Acidificacao", "Termoclina"}, 2, MEDIUM, 25};
     questions[11] = (Question){"O que sao 'microplasticos'?", {"Pequenos aparelhos eletronicos descartados no mar", "Marcas de plastico biodegradavel", "Organismos que se alimentam de plastico", "Fragmentos de plastico com menos de 5mm"}, 3, MEDIUM, 25};
     questions[12] = (Question){"A 'pesca fantasma' se refere a:", {"Equipamentos de pesca perdidos que continuam a capturar animais", "Pescar em locais assombrados por lendas", "Um tipo de pesca ilegal feita a noite", "Usar iscas que brilham no escuro para atrair peixes"}, 0, MEDIUM, 25};
@@ -232,8 +236,6 @@ void InitializeQuestions() {
     questions[17] = (Question){"O que e 'carbono azul' (blue carbon)?", {"Um tipo raro de coral azul", "A poluicao de carbono emitida por navios", "Um combustivel fossil encontrado no fundo do mar", "Carbono capturado e armazenado por ecossistemas marinhos costeiros"}, 3, MEDIUM, 25};
     questions[18] = (Question){"A meta 14.1 da ODS 14 foca em reduzir qual tipo de problema ate 2025?", {"O numero de naufragios de navios", "A poluicao marinha de todos os tipos, especialmente de fontes terrestres", "O barulho gerado por turbinas eolicas no mar", "A quantidade de sal extraida para consumo"}, 1, MEDIUM, 25};
     questions[19] = (Question){"Por que o descongelamento das geleiras e uma ameaca aos oceanos?", {"Aumenta a salinidade da agua", "Cria novas rotas de navegacao", "Eleva o nivel do mar e altera as correntes marinhas", "Diminui a quantidade de peixes"}, 2, MEDIUM, 25};
-
-    // Difíceis - 50 Pontos
     questions[20] = (Question){"O 'Giro do Pacifico Norte' e uma area oceanica conhecida por:", {"Ter as aguas mais quentes do planeta", "Ser a maior rota de migracao de baleias", "Ser o local de uma grande acumulacao de lixo plastico", "Possuir a maior quantidade de vulcoes submarinos ativos"}, 2, HARD, 50};
     questions[21] = (Question){"A Convencao das Nacoes Unidas sobre o Direito do Mar (UNCLOS) define a Zona Economica Exclusiva (ZEE) como uma faixa de ate:", {"500 milhas nauticas da costa", "12 milhas nauticas da costa", "50 milhas nauticas da costa", "200 milhas nauticas da costa"}, 3, HARD, 50};
     questions[22] = (Question){"O que e o 'Rendimento Maximo Sustentavel' (MSY) na gestao da pesca?", {"A maior quantidade de peixes que pode ser capturada sem esgotar o estoque", "O lucro maximo que uma empresa de pesca pode ter por lei", "O peso maximo que um unico barco de pesca pode transportar", "A velocidade maxima permitida para barcos de pesca em alto mar"}, 0, HARD, 50};
@@ -244,8 +246,6 @@ void InitializeQuestions() {
     questions[27] = (Question){"A 'biomagnificacao' e um processo perigoso onde:", {"Toxinas se acumulam em concentracoes maiores ao longo da cadeia alimentar", "Organismos marinhos crescem a um tamanho anormal", "A biodiversidade de uma area aumenta rapidamente", "A quantidade de sal aumenta em um organismo"}, 0, HARD, 50};
     questions[28] = (Question){"Qual destes subsidios a pesca a ODS 14.6 busca eliminar?", {"Subsidios para combustivel de pequenos pescadores", "Subsidios que contribuem para a sobrepesca e a pesca ilegal", "Financiamento para pesquisas sobre a vida marinha", "Ajuda de custo para a seguranca dos pescadores"}, 1, HARD, 50};
     questions[29] = (Question){"A 'termoclina' e uma camada no oceano onde ocorre uma rapida mudanca de:", {"Salinidade", "Pressao", "Temperatura", "Visibilidade"}, 2, HARD, 50};
-    
-    // Novas Perguntas
     questions[30] = (Question){"Qual o maior animal que ja existiu na Terra?", {"Dinossauro T-Rex", "Elefante Africano", "Baleia Azul", "Tubarão Megalodon"}, 2, EASY, 10};
     questions[31] = (Question){"Como os peixes respiram debaixo d'agua?", {"Segurando o ar por muito tempo", "Atraves de guelras (branquias)", "Pela pele", "Eles nao precisam respirar"}, 1, EASY, 10};
     questions[32] = (Question){"O que é um grande grupo de peixes nadando juntos?", {"Rebanho", "Cardume", "Alcateia", "Bando"}, 1, EASY, 10};
@@ -256,7 +256,6 @@ void InitializeQuestions() {
     questions[37] = (Question){"Qual é o ponto mais profundo conhecido nos oceanos da Terra?", {"Fossa das Marianas", "Fossa de Tonga", "Fossa do Japão", "Abismo de Challenger"}, 0, HARD, 50};
     questions[38] = (Question){"Na pesca, o que significa o termo 'bycatch' (captura acidental)?", {"Pescar mais do que o permitido", "Usar redes de pesca ilegais", "Animais marinhos capturados sem querer", "Um tipo de peixe raro"}, 2, HARD, 50};
     questions[39] = (Question){"Qual convenção internacional é o principal acordo para a prevenção da poluição do ambiente marinho por navios?", {"Convenção de Estocolmo", "Protocolo de Kyoto", "Acordo de Paris", "Convenção MARPOL"}, 3, HARD, 50};
-
     for (int i = 0; i < TOTAL_QUESTIONS; i++) {
         switch (questions[i].difficulty) {
             case EASY:   easyQuestionIndices[easyCount++] = i;   break;
@@ -267,7 +266,7 @@ void InitializeQuestions() {
 }
 
 //---------------------------------------------
-// Funções do Jogo (Omitidas por brevidade, sem alterações)
+// Funções do Jogo
 //---------------------------------------------
 void ShuffleIntArray(int *array, int size) { for (int i = size - 1; i > 0; i--) { int j = rand() % (i + 1); int temp = array[i]; array[i] = array[j]; array[j] = temp; } }
 void SelectAndShuffleQuizQuestions() { ShuffleIntArray(easyQuestionIndices, easyCount); ShuffleIntArray(mediumQuestionIndices, mediumCount); ShuffleIntArray(hardQuestionIndices, hardCount); int currentQuizIndex = 0; for (int i = 0; i < NUM_EASY && i < easyCount; i++) questionOrder[currentQuizIndex++] = easyQuestionIndices[i]; for (int i = 0; i < NUM_MEDIUM && i < mediumCount; i++) questionOrder[currentQuizIndex++] = mediumQuestionIndices[i]; for (int i = 0; i < NUM_HARD && i < hardCount; i++) questionOrder[currentQuizIndex++] = hardQuestionIndices[i]; ShuffleIntArray(questionOrder, QUIZ_QUESTIONS); }
@@ -295,36 +294,49 @@ int main(void) {
     InitAudioDevice();
 
     SetTargetFPS(60);
-    texMenu = LoadTexture("resources/tela_menu.png");
-    texQuestion = LoadTexture("resources/tela_pergunta.png");
-    texHowToPlay = LoadTexture("resources/tela_comojogar.png");
-    texLeaderboard = LoadTexture("resources/tela_leaderboard.png");
-    texCredits = LoadTexture("resources/tela_creditos.png");
-    texLogo = LoadTexture("resources/logo.png");
-    
-    fontMontserrat = LoadFontEx("resources/montserrat.ttf", 256, NULL, 250);
-    
-    selectSfx = LoadSound("resources/select.mp3");
-    buttonSfx = LoadSound("resources/button.mp3");
-    correctSfx = LoadSound("resources/correct.mp3");
-    wrongSfx = LoadSound("resources/wrong.mp3");
-    typeSfx = LoadSound("resources/type.mp3");
-    victorySfx = LoadSound("resources/victory.mp3");
 
-    bgMusic = LoadMusicStream("resources/bg_music.wav");
-    texMute = LoadTexture("resources/mute.png");
-    texUnmute = LoadTexture("resources/unmute.png");
-    
-    rainMusic = LoadMusicStream("resources/rain.mp3");
+    // Carrega resources com novos caminhos
+    texMenu = LoadTexture("resources/images/tela_menu.png");
+    texQuestion = LoadTexture("resources/images/tela_pergunta.png");
+    texHowToPlay = LoadTexture("resources/images/tela_comojogar.png");
+    texLeaderboard = LoadTexture("resources/images/tela_leaderboard.png");
+    texCredits = LoadTexture("resources/images/tela_creditos.png");
+    texLogo = LoadTexture("resources/images/logo.png");
+    fontMontserrat = LoadFontEx("resources/montserrat.ttf", 256, NULL, 250); // Fonte não mudou de pasta
+
+    // Carrega SFX
+    selectSfx = LoadSound("resources/sfx/select.mp3");
+    buttonSfx = LoadSound("resources/sfx/button.mp3");
+    correctSfx = LoadSound("resources/sfx/correct.mp3");
+    wrongSfx = LoadSound("resources/sfx/wrong.mp3");
+    typeSfx = LoadSound("resources/sfx/type.mp3");
+    victorySfx = LoadSound("resources/sfx/victory.mp3");
+    rainMusic = LoadMusicStream("resources/sfx/rain.mp3"); // Som de chuva está em /sfx
     rainMusic.looping = true;
-    
-    bgMusic.looping = true;
-    SetMusicVolume(bgMusic, musicVolume);
-    PlayMusicStream(bgMusic);
 
-    // <<< COORDENADAS E HITBOX ATUALIZADAS >>>
-    volumeIconRec = (Rectangle){ 31, 943, 54, 54 };
-    volumeSliderRec = (Rectangle){ volumeIconRec.x + volumeIconRec.width + 30, 970, 150, 20 };
+    // Carrega Músicas e UI do Player
+    musicPlaylist[0] = LoadMusicStream("resources/musics/bg_music.wav");
+    musicPlaylist[1] = LoadMusicStream("resources/musics/bg_music2.mp3");
+    musicPlaylist[2] = LoadMusicStream("resources/musics/bg_music3.mp3");
+    musicPlaylist[3] = LoadMusicStream("resources/musics/bg_music4.mp3");
+    musicPlaylist[4] = LoadMusicStream("resources/musics/bg_music5.mp3");
+    musicPlaylist[5] = LoadMusicStream("resources/musics/bg_music6.mp3");
+    
+    texMusicIcon = LoadTexture("resources/images/music.png");
+    texMute = LoadTexture("resources/images/mute.png");
+    texUnmute = LoadTexture("resources/images/unmute.png");
+    texPause = LoadTexture("resources/images/pause.png");
+    texPlay = LoadTexture("resources/images/play.png");
+    texNext = LoadTexture("resources/images/next.png");
+    texPrevious = LoadTexture("resources/images/previous.png");
+    texClose = LoadTexture("resources/images/x.png");
+
+    // Prepara e inicia a playlist
+    for (int i = 0; i < TOTAL_MUSICS; i++) musicPlaylist[i].looping = false; // Nenhuma música deve repetir por padrão
+    for (int i = 0; i < TOTAL_MUSICS - 1; i++) playlistOrder[i] = i + 1; // Prepara a ordem para embaralhar (músicas de índice 1 a 5)
+    
+    PlayMusicStream(musicPlaylist[currentMusicIndex]);
+    SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
     
     InitializeQuestions();
     LoadLeaderboard();
@@ -336,28 +348,21 @@ int main(void) {
         UpdateDrawFrame();
     }
 
-    UnloadTexture(texMenu);
-    UnloadTexture(texQuestion);
-    UnloadTexture(texHowToPlay);
-    UnloadTexture(texLeaderboard);
-    UnloadTexture(texCredits);
-    UnloadTexture(texLogo);
+    // Descarrega todos os resources
+    UnloadTexture(texMenu); UnloadTexture(texQuestion); UnloadTexture(texHowToPlay);
+    UnloadTexture(texLeaderboard); UnloadTexture(texCredits); UnloadTexture(texLogo);
     UnloadFont(fontMontserrat);
-
-    UnloadTexture(texMute);
-    UnloadTexture(texUnmute);
-    UnloadMusicStream(bgMusic);
+    
+    UnloadSound(selectSfx); UnloadSound(buttonSfx); UnloadSound(correctSfx);
+    UnloadSound(wrongSfx); UnloadSound(typeSfx); UnloadSound(victorySfx);
     UnloadMusicStream(rainMusic);
 
-    UnloadSound(selectSfx);
-    UnloadSound(buttonSfx);
-    UnloadSound(correctSfx);
-    UnloadSound(wrongSfx);
-    UnloadSound(typeSfx);
-    UnloadSound(victorySfx);
+    for (int i = 0; i < TOTAL_MUSICS; i++) UnloadMusicStream(musicPlaylist[i]);
+    UnloadTexture(texMusicIcon); UnloadTexture(texMute); UnloadTexture(texUnmute);
+    UnloadTexture(texPause); UnloadTexture(texPlay); UnloadTexture(texNext);
+    UnloadTexture(texPrevious); UnloadTexture(texClose);
 
     CloseAudioDevice();
-
     CloseWindow();
     return 0;
 }
@@ -369,26 +374,84 @@ void UpdateDrawFrame(void) {
     float deltaTime = GetFrameTime();
     float currentTime = GetTime();
 
-    UpdateMusicStream(bgMusic);
-    UpdateMusicStream(rainMusic);
+    // Atualiza a música atual se não estiver pausada
+    if (!isMusicPaused) {
+        UpdateMusicStream(musicPlaylist[currentMusicIndex]);
+    }
+    UpdateMusicStream(rainMusic); // Som de chuva continua independente
 
+    // Verifica se a música atual terminou para tocar a próxima
+    if (GetMusicTimePlayed(musicPlaylist[currentMusicIndex]) >= GetMusicTimeLength(musicPlaylist[currentMusicIndex])) {
+        PlayNextSong();
+    }
+    
     if (menuNotificationTimer > 0) {
         menuNotificationTimer -= deltaTime;
-        if (menuNotificationTimer < 0) {
-            menuNotificationTimer = 0;
-            menuNotificationText = NULL;
-        }
+        if (menuNotificationTimer < 0) { menuNotificationTimer = 0; menuNotificationText = NULL; }
     }
 
     if (IsKeyPressed(KEY_F11)) {
         ToggleFullscreen();
-        if (IsWindowFullscreen()) {
-            ShowCursor();
-        }
+        if (IsWindowFullscreen()) { ShowCursor(); }
     }
 
     Vector2 mousePos = GetMousePosition();
+    
+    // --- Lógica de UI do Music Player ---
+    Rectangle musicIconRec = { 20, SCREEN_HEIGHT - 70, 50, 50 };
+    if (CheckCollisionPointRec(mousePos, musicIconRec) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        showMusicPlayer = !showMusicPlayer;
+        PlaySound(buttonSfx);
+    }
+    
+    if (showMusicPlayer) {
+        Rectangle panelRec = { 20, SCREEN_HEIGHT - 150, 400, 80 };
+        Rectangle closeRec = { panelRec.x + panelRec.width - 25, panelRec.y + 5, 20, 20 };
+        Rectangle prevRec = { panelRec.x + 30, panelRec.y + 25, 40, 40 };
+        Rectangle playPauseRec = { panelRec.x + 80, panelRec.y + 20, 50, 50 };
+        Rectangle nextRec = { panelRec.x + 140, panelRec.y + 25, 40, 40 };
+        Rectangle muteRec = { panelRec.x + 200, panelRec.y + 25, 40, 40 };
+        Rectangle volumeSliderRec = { panelRec.x + 250, panelRec.y + 35, 120, 20 };
+
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            if (CheckCollisionPointRec(mousePos, closeRec)) {
+                showMusicPlayer = false;
+                PlaySound(buttonSfx);
+            } else if (CheckCollisionPointRec(mousePos, playPauseRec)) {
+                isMusicPaused = !isMusicPaused;
+                if (isMusicPaused) PauseMusicStream(musicPlaylist[currentMusicIndex]);
+                else ResumeMusicStream(musicPlaylist[currentMusicIndex]);
+                PlaySound(selectSfx);
+            } else if (CheckCollisionPointRec(mousePos, nextRec)) {
+                PlayNextSong();
+                PlaySound(selectSfx);
+            } else if (CheckCollisionPointRec(mousePos, prevRec)) {
+                PlayPreviousSong();
+                PlaySound(selectSfx);
+            } else if (CheckCollisionPointRec(mousePos, muteRec)) {
+                if (musicVolume > 0) musicVolume = 0;
+                else musicVolume = 0.5;
+                SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
+                PlaySound(selectSfx);
+            } else if (CheckCollisionPointRec(mousePos, volumeSliderRec)) {
+                isDraggingVolume = true;
+            }
+        }
+        
+        if (isDraggingVolume) {
+            musicVolume = (mousePos.x - volumeSliderRec.x) / volumeSliderRec.width;
+            if (musicVolume < 0.0f) musicVolume = 0.0f;
+            if (musicVolume > 1.0f) musicVolume = 1.0f;
+            SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
+        }
+        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+            isDraggingVolume = false;
+        }
+    }
+
+
     switch (currentScreen) {
+        // Lógica de telas (MENU, GAMEPLAY, etc) - sem alterações significativas
         case SCREEN_MENU: {
             Rectangle btnStart = { 691, 554, 538, 73 };
             Rectangle btnHowToPlay = { 691, 638, 538, 73 };
@@ -417,14 +480,9 @@ void UpdateDrawFrame(void) {
                         PlaySound(buttonSfx);
                         PlayMusicStream(rainMusic);
                         currentScreen = SCREEN_ENTER_NAME;
-                        isWaterAnimating = true;
-                        waterLevel = SCREEN_HEIGHT;
-                        waterRiseDelayTimer = 2.0f;
-                        playerName[0] = '\0';
-                        nameCharCount = 0;
-                        dropSpawnTimer = 0.0f;
-                        InitDrops();
-                        InitRaindrops();
+                        isWaterAnimating = true; waterLevel = SCREEN_HEIGHT; waterRiseDelayTimer = 2.0f;
+                        playerName[0] = '\0'; nameCharCount = 0;
+                        dropSpawnTimer = 0.0f; InitDrops(); InitRaindrops();
                         nextDropSpawnTime = GetRandomValue(DROP_SPAWN_INTERVAL_MIN * 100, DROP_SPAWN_INTERVAL_MAX * 100) / 100.0f;
                     } else {
                         PlaySound(wrongSfx);
@@ -432,19 +490,9 @@ void UpdateDrawFrame(void) {
                         menuNotificationTimer = 3.0f;
                     }
                 }
-                if (CheckCollisionPointRec(mousePos, btnHowToPlay)) {
-                    PlaySound(buttonSfx);
-                    hasVisitedHowToPlay = true;
-                    currentScreen = SCREEN_HOW_TO_PLAY;
-                }
-                if (CheckCollisionPointRec(mousePos, btnLeaderboard)) {
-                    PlaySound(buttonSfx);
-                    currentScreen = SCREEN_LEADERBOARD;
-                }
-                if (CheckCollisionPointRec(mousePos, btnCredits)) {
-                    PlaySound(buttonSfx);
-                    currentScreen = SCREEN_CREDITS;
-                }
+                if (CheckCollisionPointRec(mousePos, btnHowToPlay)) { PlaySound(buttonSfx); hasVisitedHowToPlay = true; currentScreen = SCREEN_HOW_TO_PLAY; }
+                if (CheckCollisionPointRec(mousePos, btnLeaderboard)) { PlaySound(buttonSfx); currentScreen = SCREEN_LEADERBOARD; }
+                if (CheckCollisionPointRec(mousePos, btnCredits)) { PlaySound(buttonSfx); currentScreen = SCREEN_CREDITS; }
             }
         } break;
         case SCREEN_HOW_TO_PLAY: case SCREEN_LEADERBOARD: case SCREEN_CREDITS: {
@@ -452,16 +500,10 @@ void UpdateDrawFrame(void) {
             bool isMouseOverBack = CheckCollisionPointRec(mousePos, btnBack);
             if (isMouseOverBack && !isHoveringBtnBack) PlaySound(selectSfx);
             isHoveringBtnBack = isMouseOverBack;
-
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, btnBack)) {
-                PlaySound(buttonSfx);
-                currentScreen = SCREEN_MENU;
-                isWaterAnimating = false;
-                waterLevel = SCREEN_HEIGHT;
-                waveOffset = 0.0f;
+                PlaySound(buttonSfx); currentScreen = SCREEN_MENU; isWaterAnimating = false; waterLevel = SCREEN_HEIGHT; waveOffset = 0.0f;
             }
         } break;
-        // Cases de Jogo (sem alteração na lógica principal)
         case SCREEN_ENTER_NAME:
         case SCREEN_GAMEPLAY:
         case SCREEN_SHOW_ANSWER:
@@ -470,29 +512,17 @@ void UpdateDrawFrame(void) {
                 if (waterLevel <= TARGET_WATER_LEVEL) {
                     int key = GetKeyPressed();
                     if ((key >= KEY_A && key <= KEY_Z) && (nameCharCount < MAX_NAME_LENGTH)) {
-                        PlaySound(typeSfx);
-                        playerName[nameCharCount++] = (char)key;
-                        playerName[nameCharCount] = '\0';
+                        PlaySound(typeSfx); playerName[nameCharCount++] = (char)key; playerName[nameCharCount] = '\0';
                     }
                     if (IsKeyPressed(KEY_BACKSPACE)) {
-                        PlaySound(typeSfx);
-                        nameCharCount--;
-                        if (nameCharCount < 0) nameCharCount = 0;
-                        playerName[nameCharCount] = '\0';
+                        PlaySound(typeSfx); nameCharCount--; if (nameCharCount < 0) nameCharCount = 0; playerName[nameCharCount] = '\0';
                     }
-                    if (IsKeyPressed(KEY_ENTER) && nameCharCount > 0) {
-                        PlaySound(buttonSfx);
-                        StartGame();
-                    }
+                    if (IsKeyPressed(KEY_ENTER) && nameCharCount > 0) { PlaySound(buttonSfx); StartGame(); }
                 }
             } else if (currentScreen == SCREEN_GAMEPLAY) {
                 questionTimer -= deltaTime;
                 if (questionTimer <= 0) {
-                    PlaySound(wrongSfx);
-                    isAnswerCorrect = false;
-                    selectedAnswer = -1;
-                    currentScreen = SCREEN_SHOW_ANSWER;
-                    answerTimer = 2.0f;
+                    PlaySound(wrongSfx); isAnswerCorrect = false; selectedAnswer = -1; currentScreen = SCREEN_SHOW_ANSWER; answerTimer = 2.0f;
                 }
                 if (IsKeyPressed(KEY_A)) { selectedAnswer = 0; PlaySound(selectSfx); }
                 if (IsKeyPressed(KEY_B)) { selectedAnswer = 1; PlaySound(selectSfx); }
@@ -502,43 +532,29 @@ void UpdateDrawFrame(void) {
                     int qIndex = questionOrder[currentQuestionIndex];
                     isAnswerCorrect = (selectedAnswer == questions[qIndex].correctOption);
                     if (isAnswerCorrect) {
-                        PlaySound(correctSfx);
-                        playerScore += questions[qIndex].points;
-                        pointsGainedNotification = questions[qIndex].points;
-                        notificationTimer = 2.0f;
-                    } else {
-                        PlaySound(wrongSfx);
-                    }
-                    currentScreen = SCREEN_SHOW_ANSWER;
-                    answerTimer = 2.0f;
+                        PlaySound(correctSfx); playerScore += questions[qIndex].points;
+                        pointsGainedNotification = questions[qIndex].points; notificationTimer = 2.0f;
+                    } else { PlaySound(wrongSfx); }
+                    currentScreen = SCREEN_SHOW_ANSWER; answerTimer = 2.0f;
                 }
             } else if (currentScreen == SCREEN_SHOW_ANSWER) {
                 answerTimer -= deltaTime;
                 if (answerTimer <= 0) {
-                    currentQuestionIndex++;
-                    selectedAnswer = -1;
+                    currentQuestionIndex++; selectedAnswer = -1;
                     if (currentQuestionIndex >= QUIZ_QUESTIONS) {
-                        UpdateLeaderboard();
-                        currentScreen = SCREEN_GAME_OVER;
-                    } else {
-                        currentScreen = SCREEN_GAMEPLAY;
-                        questionTimer = QUESTION_TIME;
-                    }
+                        UpdateLeaderboard(); currentScreen = SCREEN_GAME_OVER;
+                    } else { currentScreen = SCREEN_GAMEPLAY; questionTimer = QUESTION_TIME; }
                 }
             } else if (currentScreen == SCREEN_GAME_OVER) {
                  if (IsKeyPressed(KEY_ENTER)) {
-                    PlaySound(victorySfx);
-                    StopMusicStream(rainMusic);
-                    currentScreen = SCREEN_LEADERBOARD;
-                    isWaterAnimating = false;
-                    waterLevel = SCREEN_HEIGHT;
-                    waveOffset = 0.0f;
+                    PlaySound(victorySfx); StopMusicStream(rainMusic); currentScreen = SCREEN_LEADERBOARD;
+                    isWaterAnimating = false; waterLevel = SCREEN_HEIGHT; waveOffset = 0.0f;
                  }
             }
         } break;
         default: break;
     }
-
+    
     // Animação da água (sem alterações)
     if (isWaterAnimating) {
         if (waterRiseDelayTimer > 0) waterRiseDelayTimer -= deltaTime;
@@ -546,13 +562,10 @@ void UpdateDrawFrame(void) {
             waterLevel -= WATER_RISE_SPEED * deltaTime;
             if (waterLevel < TARGET_WATER_LEVEL) waterLevel = TARGET_WATER_LEVEL;
         }
-        waveOffset += waveSpeed * deltaTime;
-        if (waveOffset > SCREEN_WIDTH * 2) waveOffset = 0;
+        waveOffset += waveSpeed * deltaTime; if (waveOffset > SCREEN_WIDTH * 2) waveOffset = 0;
         dropSpawnTimer += deltaTime;
         if (dropSpawnTimer >= nextDropSpawnTime) {
-            SpawnRandomDrop();
-            dropSpawnTimer = 0.0f;
-            nextDropSpawnTime = GetRandomValue(DROP_SPAWN_INTERVAL_MIN * 100, DROP_SPAWN_INTERVAL_MAX * 100) / 100.0f;
+            SpawnRandomDrop(); dropSpawnTimer = 0.0f; nextDropSpawnTime = GetRandomValue(DROP_SPAWN_INTERVAL_MIN * 100, DROP_SPAWN_INTERVAL_MAX * 100) / 100.0f;
         }
         for (int i = 0; i < MAX_DROPS; i++) if (activeDrops[i].lifetime > 0.0f) activeDrops[i].lifetime -= deltaTime;
         UpdateRaindrops(deltaTime);
@@ -565,67 +578,16 @@ void UpdateDrawFrame(void) {
         float dropRipplesAtMouse = GetDropWaveContribution(mousePos.x, currentTime);
         float waterSurfaceYAtMouse = waterLevel + baseWaveAtMouse + dropRipplesAtMouse;
         if (mousePos.y > waterSurfaceYAtMouse && mouseSplashCooldown <= 0.0f) {
-            SpawnDropAt(mousePos.x, DROP_AMPLITUDE_MAX * 1.5f);
-            mouseSplashCooldown = 0.1f;
+            SpawnDropAt(mousePos.x, DROP_AMPLITUDE_MAX * 1.5f); mouseSplashCooldown = 0.1f;
         }
     }
-
-    // <<< LÓGICA DE VOLUME COM HITBOX MELHORADA >>>
-    Rectangle volumeIconHitbox = { volumeIconRec.x - 13, volumeIconRec.y - 13, 80, 80 };
-    Rectangle volumeSliderHitbox = { volumeSliderRec.x, volumeSliderRec.y - 15, volumeSliderRec.width, 50 };
-
-    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        if (CheckCollisionPointRec(mousePos, volumeIconHitbox)) {
-            showVolumeSlider = !showVolumeSlider;
-            isDraggingVolume = false; 
-            PlaySound(buttonSfx);
-        } else if (showVolumeSlider && CheckCollisionPointRec(mousePos, volumeSliderHitbox)) {
-            isDraggingVolume = true;
-        } else if (showVolumeSlider) {
-            showVolumeSlider = false;
-            isDraggingVolume = false;
-        }
-    }
-
-    if (isDraggingVolume) {
-        musicVolume = (mousePos.x - volumeSliderRec.x) / volumeSliderRec.width;
-        if (musicVolume < 0.0f) musicVolume = 0.0f;
-        if (musicVolume > 1.0f) musicVolume = 1.0f;
-        SetMusicVolume(bgMusic, musicVolume);
-    }
-
-    if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
-        isDraggingVolume = false;
-    }
-
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
 
     // Lógica de Desenho das Telas (sem alterações)
     switch (currentScreen) {
-        case SCREEN_MENU: {
-            DrawTexture(texMenu, 0, 0, WHITE);
-            Rectangle btnStart = { 691, 554, 538, 73 };
-            Rectangle btnHowToPlay = { 691, 638, 538, 73 };
-            Rectangle btnLeaderboard = { 691, 722, 538, 73 };
-            Rectangle btnCredits = { 1612, 961, 259, 55 };
-            if (CheckCollisionPointRec(mousePos, btnStart)) DrawRectangleLinesEx(btnStart, 4, BLUE);
-            if (CheckCollisionPointRec(mousePos, btnHowToPlay)) DrawRectangleLinesEx(btnHowToPlay, 4, BLUE);
-            if (CheckCollisionPointRec(mousePos, btnLeaderboard)) DrawRectangleLinesEx(btnLeaderboard, 4, BLUE);
-            if (CheckCollisionPointRec(mousePos, btnCredits)) DrawRectangleLinesEx(btnCredits, 4, BLUE);
-            if (menuNotificationTimer > 0 && menuNotificationText != NULL) {
-                float alpha = 1.0f;
-                if (menuNotificationTimer < 0.5f) alpha = menuNotificationTimer / 0.5f;
-                Vector2 textSize = MeasureTextEx(fontMontserrat, menuNotificationText, 35, 2);
-                float rectWidth = textSize.x + 40;
-                float rectHeight = textSize.y + 20;
-                Rectangle notificationRect = {(SCREEN_WIDTH - rectWidth) / 2, 850, rectWidth, rectHeight};
-                DrawRectangleRec(notificationRect, Fade(BLACK, 0.7f * alpha));
-                DrawRectangleLinesEx(notificationRect, 2, Fade(WHITE, alpha));
-                DrawTextEx(fontMontserrat, menuNotificationText, (Vector2){notificationRect.x + 20, notificationRect.y + 10}, 35, 2, Fade(YELLOW, alpha));
-            }
-        } break;
+        case SCREEN_MENU: { DrawTexture(texMenu, 0, 0, WHITE); Rectangle btnStart = { 691, 554, 538, 73 }; Rectangle btnHowToPlay = { 691, 638, 538, 73 }; Rectangle btnLeaderboard = { 691, 722, 538, 73 }; Rectangle btnCredits = { 1612, 961, 259, 55 }; if (CheckCollisionPointRec(mousePos, btnStart)) DrawRectangleLinesEx(btnStart, 4, BLUE); if (CheckCollisionPointRec(mousePos, btnHowToPlay)) DrawRectangleLinesEx(btnHowToPlay, 4, BLUE); if (CheckCollisionPointRec(mousePos, btnLeaderboard)) DrawRectangleLinesEx(btnLeaderboard, 4, BLUE); if (CheckCollisionPointRec(mousePos, btnCredits)) DrawRectangleLinesEx(btnCredits, 4, BLUE); if (menuNotificationTimer > 0 && menuNotificationText != NULL) { float alpha = 1.0f; if (menuNotificationTimer < 0.5f) alpha = menuNotificationTimer / 0.5f; Vector2 textSize = MeasureTextEx(fontMontserrat, menuNotificationText, 35, 2); float rectWidth = textSize.x + 40; float rectHeight = textSize.y + 20; Rectangle notificationRect = {(SCREEN_WIDTH - rectWidth) / 2, 850, rectWidth, rectHeight}; DrawRectangleRec(notificationRect, Fade(BLACK, 0.7f * alpha)); DrawRectangleLinesEx(notificationRect, 2, Fade(WHITE, alpha)); DrawTextEx(fontMontserrat, menuNotificationText, (Vector2){notificationRect.x + 20, notificationRect.y + 10}, 35, 2, Fade(YELLOW, alpha)); } } break;
         case SCREEN_HOW_TO_PLAY: { DrawTexture(texHowToPlay, 0, 0, WHITE); Rectangle btnBack = { 820, 911, 280, 70 }; if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE); } break;
         case SCREEN_CREDITS: { DrawTexture(texCredits, 0, 0, WHITE); Rectangle btnBack = { 820, 911, 280, 70 }; if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE); } break;
         case SCREEN_LEADERBOARD: { DrawTexture(texLeaderboard, 0, 0, WHITE); Rectangle btnBack = { 820, 911, 280, 70 }; if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE); int startY = 420; int stepY = 49; int nameCenterX = 958; int scoreX = 1120; int fontSize = 35; float spacing = 2.0f; for (int i = 0; i < LEADERBOARD_SIZE; i++) { const char* nameText = leaderboard[i].name; Vector2 nameTextSize = MeasureTextEx(fontMontserrat, nameText, fontSize, spacing); DrawTextEx(fontMontserrat, nameText, (Vector2){nameCenterX - (nameTextSize.x / 2), startY + (i * stepY)}, fontSize, spacing, BLACK); const char* scoreText = TextFormat("%03d", leaderboard[i].score); DrawTextEx(fontMontserrat, scoreText, (Vector2){scoreX, startY + (i * stepY)}, fontSize, spacing, BLACK); } } break;
@@ -636,20 +598,76 @@ void UpdateDrawFrame(void) {
     }
 
     // Desenha a UI de volume por cima de todas as telas
-    if (musicVolume <= 0.01f) {
-        DrawTexture(texMute, volumeIconRec.x, volumeIconRec.y, WHITE);
-    } else {
-        DrawTexture(texUnmute, volumeIconRec.x, volumeIconRec.y, WHITE);
-    }
+    DrawTexture(texMusicIcon, 20, SCREEN_HEIGHT - 70, WHITE);
+    if (showMusicPlayer) {
+        Rectangle panelRec = { 20, SCREEN_HEIGHT - 150, 400, 80 };
+        Rectangle closeRec = { panelRec.x + panelRec.width - 25, panelRec.y + 5, 20, 20 };
+        Rectangle prevRec = { panelRec.x + 30, panelRec.y + 25, 40, 40 };
+        Rectangle playPauseRec = { panelRec.x + 80, panelRec.y + 20, 50, 50 };
+        Rectangle nextRec = { panelRec.x + 140, panelRec.y + 25, 40, 40 };
+        Rectangle muteRec = { panelRec.x + 200, panelRec.y + 25, 40, 40 };
+        Rectangle volumeSliderRec = { panelRec.x + 250, panelRec.y + 35, 120, 20 };
 
-    if (showVolumeSlider) {
+        DrawRectangleRec(panelRec, Fade(DARKGRAY, 0.8f));
+        DrawTexture(texClose, closeRec.x, closeRec.y, WHITE);
+        DrawTexture(texPrevious, prevRec.x, prevRec.y, WHITE);
+        if (isMusicPaused) DrawTexture(texPlay, playPauseRec.x, playPauseRec.y, WHITE);
+        else DrawTexture(texPause, playPauseRec.x, playPauseRec.y, WHITE);
+        DrawTexture(texNext, nextRec.x, nextRec.y, WHITE);
+        if (musicVolume <= 0.01f) DrawTexture(texMute, muteRec.x, muteRec.y, WHITE);
+        else DrawTexture(texUnmute, muteRec.x, muteRec.y, WHITE);
+        
         DrawRectangleRec(volumeSliderRec, Fade(LIGHTGRAY, 0.8f));
-        DrawRectangleLinesEx(volumeSliderRec, 1, DARKGRAY);
         DrawRectangle(volumeSliderRec.x, volumeSliderRec.y, (int)(volumeSliderRec.width * musicVolume), volumeSliderRec.height, BLUE);
-        Rectangle knobRec = { volumeSliderRec.x + (volumeSliderRec.width * musicVolume) - 5, volumeSliderRec.y - 5, 10, 30 };
-        DrawRectangleRec(knobRec, RAYWHITE);
-        DrawRectangleLinesEx(knobRec, 1, DARKGRAY);
     }
     
     EndDrawing();
+}
+
+//---------------------------------------------
+// Funções do Music Player
+//---------------------------------------------
+void PlayNextSong(void) {
+    StopMusicStream(musicPlaylist[currentMusicIndex]);
+
+    if (currentPlaylistPosition == -1) { // Estava tocando a música principal
+        ShuffleIntArray(playlistOrder, TOTAL_MUSICS - 1);
+        currentPlaylistPosition = 0;
+    } else {
+        currentPlaylistPosition++;
+        if (currentPlaylistPosition >= TOTAL_MUSICS - 1) { // Reinicia a playlist aleatória
+            ShuffleIntArray(playlistOrder, TOTAL_MUSICS - 1);
+            currentPlaylistPosition = 0;
+        }
+    }
+    
+    currentMusicIndex = playlistOrder[currentPlaylistPosition];
+    PlayMusicStream(musicPlaylist[currentMusicIndex]);
+    SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
+    if (isMusicPaused) PauseMusicStream(musicPlaylist[currentMusicIndex]);
+}
+
+void PlayPreviousSong(void) {
+    // Se a música atual tocou por mais de 3 segundos, reinicia ela. Senão, volta para a anterior.
+    if (GetMusicTimePlayed(musicPlaylist[currentMusicIndex]) > 3.0f) {
+        StopMusicStream(musicPlaylist[currentMusicIndex]);
+        PlayMusicStream(musicPlaylist[currentMusicIndex]);
+        SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
+        if (isMusicPaused) PauseMusicStream(musicPlaylist[currentMusicIndex]);
+        return;
+    }
+
+    StopMusicStream(musicPlaylist[currentMusicIndex]);
+
+    if (currentPlaylistPosition <= 0) { // Se está na primeira da lista ou na principal, volta pra principal
+        currentPlaylistPosition = -1;
+        currentMusicIndex = 0;
+    } else {
+        currentPlaylistPosition--;
+        currentMusicIndex = playlistOrder[currentPlaylistPosition];
+    }
+    
+    PlayMusicStream(musicPlaylist[currentMusicIndex]);
+    SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
+    if (isMusicPaused) PauseMusicStream(musicPlaylist[currentMusicIndex]);
 }
