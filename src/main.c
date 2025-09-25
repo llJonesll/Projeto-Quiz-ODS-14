@@ -2,15 +2,15 @@
  * @file quiz_ods14.c
  * @author Gemini, com base no protótipo de Prof. Dr. David Buzatto
  * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
- * @version 3.0
- * @date 2025-09-24
+ * @version 3.2
+ * @date 2025-09-25
  *
  * @copyright Copyright (c) 2025
  *
- * @note Mudanças da v3.0:
- * - Adicionado efeito sonoro (type.mp3) para cada tecla pressionada na tela de inserção de nome.
- * - Adicionado efeito sonoro de vitória (victory.mp3) ao sair da tela de "FIM DE JOGO".
- * - Otimizado o momento em que a música de fundo (rain.mp3) é interrompida.
+ * @note Mudanças da v3.2:
+ * - O jogador agora precisa visitar a tela "Como Jogar" antes de poder iniciar o quiz.
+ * - Uma notificação amigável é exibida no menu se o jogador tentar iniciar sem
+ * ter lido as instruções.
  */
 
 #include "raylib/raylib.h"
@@ -159,8 +159,8 @@ static Sound selectSfx;
 static Sound buttonSfx;
 static Sound correctSfx;
 static Sound wrongSfx;
-static Sound typeSfx;    // <<< NOVO
-static Sound victorySfx; // <<< NOVO
+static Sound typeSfx;
+static Sound victorySfx;
 
 // Variáveis para controlar som de hover
 static bool isHoveringBtnStart = false;
@@ -168,6 +168,11 @@ static bool isHoveringBtnHowToPlay = false;
 static bool isHoveringBtnLeaderboard = false;
 static bool isHoveringBtnCredits = false;
 static bool isHoveringBtnBack = false;
+
+// <<< NOVO: Variáveis para controle de fluxo e notificação no menu >>>
+static bool hasVisitedHowToPlay = false;
+static const char* menuNotificationText = NULL;
+static float menuNotificationTimer = 0.0f;
 
 
 //---------------------------------------------
@@ -480,37 +485,40 @@ void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float f
 int main(void) {
     srand(time(NULL));
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Quiz - Navegando pela ODS 14");
-    Image icon = LoadImage("resources/icon.png");
+    
+    Image icon = LoadImage("resources/icon_32.png");
     SetWindowIcon(icon);
+    
+    UnloadImage(icon);
+    
     
     InitAudioDevice();
 
     SetTargetFPS(60);
-
     texMenu = LoadTexture("resources/tela_menu.png");
     texQuestion = LoadTexture("resources/tela_pergunta.png");
     texHowToPlay = LoadTexture("resources/tela_comojogar.png");
     texLeaderboard = LoadTexture("resources/tela_leaderboard.png");
     texCredits = LoadTexture("resources/tela_creditos.png");
     texLogo = LoadTexture("resources/logo.png");
-
+    
     fontMontserrat = LoadFontEx("resources/montserrat.ttf", 256, NULL, 250);
-
+    
     selectSfx = LoadSound("resources/select.mp3");
     buttonSfx = LoadSound("resources/button.mp3");
     correctSfx = LoadSound("resources/correct.mp3");
     wrongSfx = LoadSound("resources/wrong.mp3");
     rainMusic = LoadMusicStream("resources/rain.mp3");
     rainMusic.looping = true;
-    typeSfx = LoadSound("resources/type.mp3");       // <<< NOVO
-    victorySfx = LoadSound("resources/victory.mp3"); // <<< NOVO
-
+    typeSfx = LoadSound("resources/type.mp3");
+    victorySfx = LoadSound("resources/victory.mp3");
+    
     InitializeQuestions();
     LoadLeaderboard();
     waterLevel = SCREEN_HEIGHT;
     InitDrops();
     InitRaindrops();
-
+    
     while (!WindowShouldClose()) {
         UpdateDrawFrame();
     }
@@ -522,14 +530,14 @@ int main(void) {
     UnloadTexture(texCredits);
     UnloadTexture(texLogo);
     UnloadFont(fontMontserrat);
-    UnloadImage(icon);
+    
 
     UnloadSound(selectSfx);
     UnloadSound(buttonSfx);
     UnloadSound(correctSfx);
     UnloadSound(wrongSfx);
-    UnloadSound(typeSfx);    // <<< NOVO
-    UnloadSound(victorySfx); // <<< NOVO
+    UnloadSound(typeSfx);
+    UnloadSound(victorySfx);
     UnloadMusicStream(rainMusic);
 
     CloseAudioDevice();
@@ -546,6 +554,15 @@ void UpdateDrawFrame(void) {
     float currentTime = GetTime();
 
     UpdateMusicStream(rainMusic);
+
+    // <<< NOVO: Atualiza o timer da notificação do menu >>>
+    if (menuNotificationTimer > 0) {
+        menuNotificationTimer -= deltaTime;
+        if (menuNotificationTimer < 0) {
+            menuNotificationTimer = 0;
+            menuNotificationText = NULL;
+        }
+    }
 
     if (IsKeyPressed(KEY_F11)) {
         ToggleFullscreen();
@@ -580,21 +597,30 @@ void UpdateDrawFrame(void) {
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 if (CheckCollisionPointRec(mousePos, btnStart)) {
-                    PlaySound(buttonSfx);
-                    PlayMusicStream(rainMusic);
-                    currentScreen = SCREEN_ENTER_NAME;
-                    isWaterAnimating = true;
-                    waterLevel = SCREEN_HEIGHT;
-                    waterRiseDelayTimer = 2.0f;
-                    playerName[0] = '\0';
-                    nameCharCount = 0;
-                    dropSpawnTimer = 0.0f;
-                    InitDrops();
-                    InitRaindrops();
-                    nextDropSpawnTime = GetRandomValue(DROP_SPAWN_INTERVAL_MIN * 100, DROP_SPAWN_INTERVAL_MAX * 100) / 100.0f;
+                    // <<< ALTERADO: Verifica se o jogador já visitou "Como Jogar" >>>
+                    if (hasVisitedHowToPlay) {
+                        PlaySound(buttonSfx);
+                        PlayMusicStream(rainMusic);
+                        currentScreen = SCREEN_ENTER_NAME;
+                        isWaterAnimating = true;
+                        waterLevel = SCREEN_HEIGHT;
+                        waterRiseDelayTimer = 2.0f;
+                        playerName[0] = '\0';
+                        nameCharCount = 0;
+                        dropSpawnTimer = 0.0f;
+                        InitDrops();
+                        InitRaindrops();
+                        nextDropSpawnTime = GetRandomValue(DROP_SPAWN_INTERVAL_MIN * 100, DROP_SPAWN_INTERVAL_MAX * 100) / 100.0f;
+                    } else {
+                        // <<< NOVO: Ativa a notificação se o jogador não leu as regras >>>
+                        PlaySound(wrongSfx);
+                        menuNotificationText = "Atencao! Por favor, leia 'Como Jogar' antes de iniciar.";
+                        menuNotificationTimer = 3.0f; // Duração da notificação em segundos
+                    }
                 }
                 if (CheckCollisionPointRec(mousePos, btnHowToPlay)) {
                     PlaySound(buttonSfx);
+                    hasVisitedHowToPlay = true; // <<< NOVO: Marca que o jogador visitou a tela
                     currentScreen = SCREEN_HOW_TO_PLAY;
                 }
                 if (CheckCollisionPointRec(mousePos, btnLeaderboard)) {
@@ -626,22 +652,25 @@ void UpdateDrawFrame(void) {
         case SCREEN_GAMEPLAY:
         case SCREEN_SHOW_ANSWER:
         case SCREEN_GAME_OVER: {
-            int key = GetKeyPressed();
             if (currentScreen == SCREEN_ENTER_NAME) {
-                if ((key >= KEY_A && key <= KEY_Z) && (nameCharCount < MAX_NAME_LENGTH)) {
-                    PlaySound(typeSfx); // <<< NOVO
-                    playerName[nameCharCount++] = (char)key;
-                    playerName[nameCharCount] = '\0';
-                }
-                if (IsKeyPressed(KEY_BACKSPACE)) {
-                    PlaySound(typeSfx); // <<< NOVO
-                    nameCharCount--;
-                    if (nameCharCount < 0) nameCharCount = 0;
-                    playerName[nameCharCount] = '\0';
-                }
-                if (IsKeyPressed(KEY_ENTER) && nameCharCount > 0) {
-                    PlaySound(buttonSfx);
-                    StartGame();
+                // Só permite a digitação após a animação da água terminar
+                if (waterLevel <= TARGET_WATER_LEVEL) {
+                    int key = GetKeyPressed();
+                    if ((key >= KEY_A && key <= KEY_Z) && (nameCharCount < MAX_NAME_LENGTH)) {
+                        PlaySound(typeSfx);
+                        playerName[nameCharCount++] = (char)key;
+                        playerName[nameCharCount] = '\0';
+                    }
+                    if (IsKeyPressed(KEY_BACKSPACE)) {
+                        PlaySound(typeSfx);
+                        nameCharCount--;
+                        if (nameCharCount < 0) nameCharCount = 0;
+                        playerName[nameCharCount] = '\0';
+                    }
+                    if (IsKeyPressed(KEY_ENTER) && nameCharCount > 0) {
+                        PlaySound(buttonSfx);
+                        StartGame();
+                    }
                 }
             } else if (currentScreen == SCREEN_GAMEPLAY) {
                 questionTimer -= deltaTime;
@@ -686,8 +715,8 @@ void UpdateDrawFrame(void) {
                 }
             } else if (currentScreen == SCREEN_GAME_OVER) {
                  if (IsKeyPressed(KEY_ENTER)) {
-                    PlaySound(victorySfx); // <<< NOVO
-                    StopMusicStream(rainMusic); // <<< ALTERADO: Para a música aqui
+                    PlaySound(victorySfx);
+                    StopMusicStream(rainMusic);
                     currentScreen = SCREEN_LEADERBOARD;
                     isWaterAnimating = false;
                     waterLevel = SCREEN_HEIGHT;
@@ -759,6 +788,25 @@ void UpdateDrawFrame(void) {
             if (CheckCollisionPointRec(mousePos, btnHowToPlay)) DrawRectangleLinesEx(btnHowToPlay, 4, BLUE);
             if (CheckCollisionPointRec(mousePos, btnLeaderboard)) DrawRectangleLinesEx(btnLeaderboard, 4, BLUE);
             if (CheckCollisionPointRec(mousePos, btnCredits)) DrawRectangleLinesEx(btnCredits, 4, BLUE);
+
+            // <<< NOVO: Desenha a notificação, se ela estiver ativa >>>
+            if (menuNotificationTimer > 0 && menuNotificationText != NULL) {
+                float alpha = 1.0f;
+                // Efeito de fade out no final
+                if (menuNotificationTimer < 0.5f) alpha = menuNotificationTimer / 0.5f;
+
+                Vector2 textSize = MeasureTextEx(fontMontserrat, menuNotificationText, 35, 2);
+                float rectWidth = textSize.x + 40;
+                float rectHeight = textSize.y + 20;
+                Rectangle notificationRect = {(SCREEN_WIDTH - rectWidth) / 2, 880, rectWidth, rectHeight};
+
+                DrawRectangleRec(notificationRect, Fade(BLACK, 0.7f * alpha));
+                DrawRectangleLinesEx(notificationRect, 2, Fade(WHITE, alpha));
+                DrawTextEx(fontMontserrat, menuNotificationText,
+                           (Vector2){notificationRect.x + 20, notificationRect.y + 10},
+                           35, 2, Fade(RED, alpha));
+            }
+
         } break;
         case SCREEN_HOW_TO_PLAY: {
             DrawTexture(texHowToPlay, 0, 0, WHITE);
@@ -793,22 +841,30 @@ void UpdateDrawFrame(void) {
             if (isWaterAnimating) DrawWaterAndRain(currentTime);
             
             const char* title = "Tudo pronto para comecar!";
-            const char* subtitle = "Digite suas iniciais (3 letras):";
-            const char* hint = "Pressione ENTER para iniciar o quiz";
+            // O subtítulo muda dependendo do estado da animação
+            const char* subtitle = "Aguarde a maré subir...";
+            if (waterLevel <= TARGET_WATER_LEVEL) {
+                subtitle = "Digite suas iniciais (3 letras):";
+            }
 
             DrawTextEx(fontMontserrat, title, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, title, 60, 2).x/2, 300}, 60, 2, RAYWHITE);
             DrawTextEx(fontMontserrat, subtitle, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, subtitle, 40, 2).x/2, 500}, 40, 2, LIGHTGRAY);
             
-            DrawRectangle(SCREEN_WIDTH/2 - 150, 560, 300, 80, RAYWHITE);
-            DrawRectangleLines(SCREEN_WIDTH/2 - 150, 560, 300, 80, DARKGRAY);
-            
-            DrawTextEx(fontMontserrat, playerName, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, playerName, 60, 2).x/2, 570}, 60, 2, DARKBLUE);
-            
-            if (nameCharCount < MAX_NAME_LENGTH && ((int)(GetTime()*2.0f)) % 2 == 0) {
-                Vector2 textSize = MeasureTextEx(fontMontserrat, playerName, 60, 2);
-                DrawTextEx(fontMontserrat, "_", (Vector2){SCREEN_WIDTH/2 - textSize.x/2 + textSize.x, 570}, 60, 2, DARKBLUE);
+            // Caixa de texto, nome e dica só aparecem quando a animação termina
+            if (waterLevel <= TARGET_WATER_LEVEL) {
+                const char* hint = "Pressione ENTER para iniciar o quiz";
+
+                DrawRectangle(SCREEN_WIDTH/2 - 150, 560, 300, 80, RAYWHITE);
+                DrawRectangleLines(SCREEN_WIDTH/2 - 150, 560, 300, 80, DARKGRAY);
+                
+                DrawTextEx(fontMontserrat, playerName, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, playerName, 60, 2).x/2, 570}, 60, 2, DARKBLUE);
+                
+                if (nameCharCount < MAX_NAME_LENGTH && ((int)(GetTime()*2.0f)) % 2 == 0) {
+                    Vector2 textSize = MeasureTextEx(fontMontserrat, playerName, 60, 2);
+                    DrawTextEx(fontMontserrat, "_", (Vector2){SCREEN_WIDTH/2 - textSize.x/2 + textSize.x, 570}, 60, 2, DARKBLUE);
+                }
+                DrawTextEx(fontMontserrat, hint, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY);
             }
-            DrawTextEx(fontMontserrat, hint, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY);
         } break;
         case SCREEN_GAMEPLAY: case SCREEN_SHOW_ANSWER: {
             DrawTexture(texQuestion, 0, 0, WHITE);
