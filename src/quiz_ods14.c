@@ -1,31 +1,30 @@
 /**
- * @file quiz_ods14.c
- * @author Gemini, com base no protótipo de Prof. Dr. David Buzatto
- * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
- * @version 3.8
- * @date 2025-09-25
- *
- * @copyright Copyright (c) 2025
- *
- * @note Mudanças da v3.8:
- * - Implementado um music player completo com controles de play/pause, next/previous e volume.
- * - Adicionada uma playlist com 6 músicas que tocam em ordem aleatória (após a principal)
- * e sem repetição até que todas tenham tocado.
- * - Atualizados todos os caminhos de carregamento de recursos (imagens, sfx, músicas)
- * para uma nova estrutura de subpastas.
- * - O som de chuva foi reclassificado como efeito sonoro (carregado de /sfx).
- */
+ * @file quiz_ods14.c
+ * @author Gemini, com base no protótipo de Prof. Dr. David Buzatto
+ * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
+ * @version 3.9
+ * @date 2025-09-25
+ *
+ * @copyright Copyright (c) 2025
+ *
+ * @note Mudanças da v3.9:
+ * - Refatorado todo o código do music player para os arquivos `music_player.c` e `music_player.h`.
+ * - O arquivo principal agora apenas chama as funções de inicialização, atualização,
+ * desenho e descarregamento do player, tornando o código mais limpo e modular.
+ * - Implementado novo layout animado para o music player, conforme especificado.
+ */
 
 #include "raylib/raylib.h"
+#include "raylib/music_player.h" // <<< INCLUÍDO NOSSO NOVO PLAYER
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-#include <time.h> // Para embaralhar as perguntas
-#include <math.h> // Para a função sinf da onda
+#include <time.h> 
+#include <math.h> 
 
 //---------------------------------------------
-// Definições e Constantes
+// Definições e Constantes (sem alterações)
 //---------------------------------------------
 #define SCREEN_WIDTH 1920
 #define SCREEN_HEIGHT 1080
@@ -36,11 +35,7 @@
 #define NUM_HARD 4
 #define LEADERBOARD_SIZE 6
 #define MAX_NAME_LENGTH 3
-#define TOTAL_MUSICS 6 // <<< NOVO
-
 #define QUESTION_TIME 15.0f
-
-// Definições para as ondulações na água
 #define MAX_DROPS 3000
 #define DROP_SPAWN_INTERVAL_MIN 0.0f
 #define DROP_SPAWN_INTERVAL_MAX 0.1f
@@ -48,64 +43,24 @@
 #define DROP_AMPLITUDE_MAX 9.0f
 #define DROP_WAVE_SPEED 250.0f
 #define DROP_WAVE_FREQUENCY 0.1f
-
-// Definições para as gotas de chuva visuais
 #define MAX_RAINDROPS 3000
 #define RAINDROP_SPEED_MIN 300
 #define RAINDROP_SPEED_MAX 600
 #define RAINDROP_LENGTH_MIN 15
 #define RAINDROP_LENGTH_MAX 35
 
+//---------------------------------------------
+// Tipos Customizados (sem alterações)
+//---------------------------------------------
+typedef enum { SCREEN_MENU, SCREEN_HOW_TO_PLAY, SCREEN_LEADERBOARD, SCREEN_CREDITS, SCREEN_ENTER_NAME, SCREEN_GAMEPLAY, SCREEN_SHOW_ANSWER, SCREEN_GAME_OVER } GameScreen;
+typedef enum { EASY, MEDIUM, HARD } Difficulty;
+typedef struct { const char* questionText; const char* options[4]; int correctOption; Difficulty difficulty; int points; } Question;
+typedef struct { char name[MAX_NAME_LENGTH + 1]; int score; } PlayerScore;
+typedef struct { Vector2 position; float lifetime; float spawnTime; float initialAmplitude; } Drop;
+typedef struct { Vector2 startPos; float length; float speed; } Raindrop;
 
 //---------------------------------------------
-// Tipos Customizados (Enums, Structs)
-//---------------------------------------------
-typedef enum {
-    SCREEN_MENU,
-    SCREEN_HOW_TO_PLAY,
-    SCREEN_LEADERBOARD,
-    SCREEN_CREDITS,
-    SCREEN_ENTER_NAME,
-    SCREEN_GAMEPLAY,
-    SCREEN_SHOW_ANSWER,
-    SCREEN_GAME_OVER
-} GameScreen;
-
-typedef enum {
-    EASY,
-    MEDIUM,
-    HARD
-} Difficulty;
-
-typedef struct {
-    const char* questionText;
-    const char* options[4];
-    int correctOption;
-    Difficulty difficulty;
-    int points;
-} Question;
-
-typedef struct {
-    char name[MAX_NAME_LENGTH + 1];
-    int score;
-} PlayerScore;
-
-typedef struct {
-    Vector2 position;
-    float lifetime;
-    float spawnTime;
-    float initialAmplitude;
-} Drop;
-
-typedef struct {
-    Vector2 startPos;
-    float length;
-    float speed;
-} Raindrop;
-
-
-//---------------------------------------------
-// Variáveis Globais
+// Variáveis Globais (sem as do music player)
 //---------------------------------------------
 static GameScreen currentScreen = SCREEN_MENU;
 static Question questions[TOTAL_QUESTIONS];
@@ -122,15 +77,8 @@ static float answerTimer = 0.0f;
 static PlayerScore leaderboard[LEADERBOARD_SIZE];
 static char playerName[MAX_NAME_LENGTH + 1] = "\0";
 static int nameCharCount = 0;
-static Texture2D texMenu;
-static Texture2D texQuestion;
-static Texture2D texHowToPlay;
-static Texture2D texLeaderboard;
-static Texture2D texCredits;
-static Texture2D texLogo;
+static Texture2D texMenu, texQuestion, texHowToPlay, texLeaderboard, texCredits, texLogo;
 static Font fontMontserrat;
-
-// Variáveis para controlar a animação da água
 static float waterLevel;
 static bool isWaterAnimating = false;
 static const float WATER_RISE_SPEED = 110.0f;
@@ -139,83 +87,42 @@ static float waveAmplitude = 10.0f;
 static float waveFrequency = 0.005f;
 static float waveSpeed = 80.0f;
 static float waveOffset = 0.0f;
-
 static Drop activeDrops[MAX_DROPS];
 static float dropSpawnTimer = 0.0f;
 static float nextDropSpawnTime = 0.0f;
-
 static Raindrop raindrops[MAX_RAINDROPS];
-
 static float mouseSplashCooldown = 0.0f;
-
 static float questionTimer;
-
-// Variáveis para notificação de pontos
 static int pointsGainedNotification = 0;
 static float notificationTimer = 0.0f;
-
-// Timer para a espera da subida da água
 static float waterRiseDelayTimer = 0.0f;
-
-// Variáveis de Áudio e Efeitos
-static Music rainMusic; // Som de chuva, agora tratado como SFX
-static Sound selectSfx;
-static Sound buttonSfx;
-static Sound correctSfx;
-static Sound wrongSfx;
-static Sound typeSfx;
-static Sound victorySfx;
-
-// <<< NOVO: Sistema do Music Player >>>
-static Music musicPlaylist[TOTAL_MUSICS];
-static int playlistOrder[TOTAL_MUSICS - 1]; // Ordem aleatória para as músicas 2 a 6
-static int currentMusicIndex = 0;
-static int currentPlaylistPosition = -1; // -1: música principal, 0-4: posição na playlist aleatória
-static bool isMusicPaused = false;
-static bool showMusicPlayer = false;
-static float musicVolume = 0.5f;
-static bool isDraggingVolume = false;
-static Texture2D texMusicIcon, texMute, texUnmute, texPause, texPlay, texNext, texPrevious, texClose;
-
-// Variáveis para controlar som de hover
-static bool isHoveringBtnStart = false;
-static bool isHoveringBtnHowToPlay = false;
-static bool isHoveringBtnLeaderboard = false;
-static bool isHoveringBtnCredits = false;
-static bool isHoveringBtnBack = false;
-
-// Variáveis para controle de fluxo e notificação no menu
+static Music rainMusic; 
+static Sound selectSfx, buttonSfx, correctSfx, wrongSfx, typeSfx, victorySfx;
+static bool isHoveringBtnStart = false, isHoveringBtnHowToPlay = false, isHoveringBtnLeaderboard = false, isHoveringBtnCredits = false, isHoveringBtnBack = false;
 static bool hasVisitedHowToPlay = false;
 static const char* menuNotificationText = NULL;
 static float menuNotificationTimer = 0.0f;
 
-
 //---------------------------------------------
-// Protótipos de Funções
+// Protótipos de Funções (sem os do music player)
 //---------------------------------------------
 void UpdateDrawFrame(void);
 void InitializeQuestions(void);
 void LoadLeaderboard(void);
-void ShuffleIntArray(int *array, int size); // Já existia, mas agora é mais usada
-void PlayNextSong(void);
-void PlayPreviousSong(void);
-
 void InitDrops(void);
 void SpawnRandomDrop(void);
 void SpawnDropAt(float x, float amplitude);
 float GetDropWaveContribution(float x, float currentTime);
-
 void InitRaindrops(void);
 void UpdateRaindrops(float deltaTime);
 void DrawWaterAndRain(float currentTime);
-
 void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float fontSize, float spacing, Color color);
 
-
 //---------------------------------------------
-// Banco de Perguntas - ODS 14 (Inalterado)
+// Banco de Perguntas (Inalterado)
 //---------------------------------------------
 void InitializeQuestions() {
+    // ... (código do banco de perguntas omitido por brevidade)
     questions[0] = (Question){"Qual o principal objetivo da ODS 14: Vida na Agua?", {"Conservar e usar de forma sustentavel os oceanos e mares", "Aumentar a producao de peixes para alimentacao", "Promover o turismo em todas as areas costeiras", "Incentivar a extracao de petroleo no fundo do mar"}, 0, EASY, 10};
     questions[1] = (Question){"Qual material representa a maior parte do lixo encontrado nos oceanos?", {"Vidro", "Plastico", "Metal", "Papel"}, 1, EASY, 10};
     questions[2] = (Question){"O que causa o 'branqueamento' dos corais?", {"Excesso de peixes na regiao", "Sombras de barcos passando", "Aumento da temperatura da agua", "Falta de sal no mar"}, 2, EASY, 10};
@@ -266,7 +173,7 @@ void InitializeQuestions() {
 }
 
 //---------------------------------------------
-// Funções do Jogo
+// Funções do Jogo (Inalteradas)
 //---------------------------------------------
 void ShuffleIntArray(int *array, int size) { for (int i = size - 1; i > 0; i--) { int j = rand() % (i + 1); int temp = array[i]; array[i] = array[j]; array[j] = temp; } }
 void SelectAndShuffleQuizQuestions() { ShuffleIntArray(easyQuestionIndices, easyCount); ShuffleIntArray(mediumQuestionIndices, mediumCount); ShuffleIntArray(hardQuestionIndices, hardCount); int currentQuizIndex = 0; for (int i = 0; i < NUM_EASY && i < easyCount; i++) questionOrder[currentQuizIndex++] = easyQuestionIndices[i]; for (int i = 0; i < NUM_MEDIUM && i < mediumCount; i++) questionOrder[currentQuizIndex++] = mediumQuestionIndices[i]; for (int i = 0; i < NUM_HARD && i < hardCount; i++) questionOrder[currentQuizIndex++] = hardQuestionIndices[i]; ShuffleIntArray(questionOrder, QUIZ_QUESTIONS); }
@@ -290,54 +197,32 @@ void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float f
 int main(void) {
     srand(time(NULL));
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Quiz - Navegando pela ODS 14");
-    
     InitAudioDevice();
-
     SetTargetFPS(60);
 
-    // Carrega resources com novos caminhos
+    // Carrega resources do jogo
     texMenu = LoadTexture("resources/images/tela_menu.png");
     texQuestion = LoadTexture("resources/images/tela_pergunta.png");
     texHowToPlay = LoadTexture("resources/images/tela_comojogar.png");
     texLeaderboard = LoadTexture("resources/images/tela_leaderboard.png");
     texCredits = LoadTexture("resources/images/tela_creditos.png");
     texLogo = LoadTexture("resources/images/logo.png");
-    fontMontserrat = LoadFontEx("resources/montserrat.ttf", 256, NULL, 250); // Fonte não mudou de pasta
+    fontMontserrat = LoadFontEx("resources/montserrat.ttf", 256, NULL, 250);
 
-    // Carrega SFX
+    // Carrega SFX do jogo
     selectSfx = LoadSound("resources/sfx/select.mp3");
     buttonSfx = LoadSound("resources/sfx/button.mp3");
     correctSfx = LoadSound("resources/sfx/correct.mp3");
     wrongSfx = LoadSound("resources/sfx/wrong.mp3");
     typeSfx = LoadSound("resources/sfx/type.mp3");
     victorySfx = LoadSound("resources/sfx/victory.mp3");
-    rainMusic = LoadMusicStream("resources/sfx/rain.mp3"); // Som de chuva está em /sfx
+    rainMusic = LoadMusicStream("resources/sfx/rain.mp3");
     rainMusic.looping = true;
 
-    // Carrega Músicas e UI do Player
-    musicPlaylist[0] = LoadMusicStream("resources/musics/bg_music.wav");
-    musicPlaylist[1] = LoadMusicStream("resources/musics/bg_music2.mp3");
-    musicPlaylist[2] = LoadMusicStream("resources/musics/bg_music3.mp3");
-    musicPlaylist[3] = LoadMusicStream("resources/musics/bg_music4.mp3");
-    musicPlaylist[4] = LoadMusicStream("resources/musics/bg_music5.mp3");
-    musicPlaylist[5] = LoadMusicStream("resources/musics/bg_music6.mp3");
+    // <<< INICIA O MUSIC PLAYER >>>
+    InitMusicPlayer();
     
-    texMusicIcon = LoadTexture("resources/images/music.png");
-    texMute = LoadTexture("resources/images/mute.png");
-    texUnmute = LoadTexture("resources/images/unmute.png");
-    texPause = LoadTexture("resources/images/pause.png");
-    texPlay = LoadTexture("resources/images/play.png");
-    texNext = LoadTexture("resources/images/next.png");
-    texPrevious = LoadTexture("resources/images/previous.png");
-    texClose = LoadTexture("resources/images/x.png");
-
-    // Prepara e inicia a playlist
-    for (int i = 0; i < TOTAL_MUSICS; i++) musicPlaylist[i].looping = false; // Nenhuma música deve repetir por padrão
-    for (int i = 0; i < TOTAL_MUSICS - 1; i++) playlistOrder[i] = i + 1; // Prepara a ordem para embaralhar (músicas de índice 1 a 5)
-    
-    PlayMusicStream(musicPlaylist[currentMusicIndex]);
-    SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
-    
+    // Inicia o jogo
     InitializeQuestions();
     LoadLeaderboard();
     waterLevel = SCREEN_HEIGHT;
@@ -348,19 +233,16 @@ int main(void) {
         UpdateDrawFrame();
     }
 
-    // Descarrega todos os resources
+    // Descarrega resources do jogo
     UnloadTexture(texMenu); UnloadTexture(texQuestion); UnloadTexture(texHowToPlay);
     UnloadTexture(texLeaderboard); UnloadTexture(texCredits); UnloadTexture(texLogo);
     UnloadFont(fontMontserrat);
-    
     UnloadSound(selectSfx); UnloadSound(buttonSfx); UnloadSound(correctSfx);
     UnloadSound(wrongSfx); UnloadSound(typeSfx); UnloadSound(victorySfx);
     UnloadMusicStream(rainMusic);
 
-    for (int i = 0; i < TOTAL_MUSICS; i++) UnloadMusicStream(musicPlaylist[i]);
-    UnloadTexture(texMusicIcon); UnloadTexture(texMute); UnloadTexture(texUnmute);
-    UnloadTexture(texPause); UnloadTexture(texPlay); UnloadTexture(texNext);
-    UnloadTexture(texPrevious); UnloadTexture(texClose);
+    // <<< DESCARREGA O MUSIC PLAYER >>>
+    UnloadMusicPlayer();
 
     CloseAudioDevice();
     CloseWindow();
@@ -374,17 +256,13 @@ void UpdateDrawFrame(void) {
     float deltaTime = GetFrameTime();
     float currentTime = GetTime();
 
-    // Atualiza a música atual se não estiver pausada
-    if (!isMusicPaused) {
-        UpdateMusicStream(musicPlaylist[currentMusicIndex]);
-    }
-    UpdateMusicStream(rainMusic); // Som de chuva continua independente
-
-    // Verifica se a música atual terminou para tocar a próxima
-    if (GetMusicTimePlayed(musicPlaylist[currentMusicIndex]) >= GetMusicTimeLength(musicPlaylist[currentMusicIndex])) {
-        PlayNextSong();
-    }
+    // <<< ATUALIZA O MUSIC PLAYER >>>
+    UpdateMusicPlayer();
     
+    // Atualiza o som de chuva (controlado pelo jogo)
+    UpdateMusicStream(rainMusic);
+
+    // (O resto da lógica de atualização do jogo permanece aqui)
     if (menuNotificationTimer > 0) {
         menuNotificationTimer -= deltaTime;
         if (menuNotificationTimer < 0) { menuNotificationTimer = 0; menuNotificationText = NULL; }
@@ -394,64 +272,11 @@ void UpdateDrawFrame(void) {
         ToggleFullscreen();
         if (IsWindowFullscreen()) { ShowCursor(); }
     }
-
+    
     Vector2 mousePos = GetMousePosition();
     
-    // --- Lógica de UI do Music Player ---
-    Rectangle musicIconRec = { 20, SCREEN_HEIGHT - 70, 50, 50 };
-    if (CheckCollisionPointRec(mousePos, musicIconRec) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        showMusicPlayer = !showMusicPlayer;
-        PlaySound(buttonSfx);
-    }
-    
-    if (showMusicPlayer) {
-        Rectangle panelRec = { 20, SCREEN_HEIGHT - 150, 400, 80 };
-        Rectangle closeRec = { panelRec.x + panelRec.width - 25, panelRec.y + 5, 20, 20 };
-        Rectangle prevRec = { panelRec.x + 30, panelRec.y + 25, 40, 40 };
-        Rectangle playPauseRec = { panelRec.x + 80, panelRec.y + 20, 50, 50 };
-        Rectangle nextRec = { panelRec.x + 140, panelRec.y + 25, 40, 40 };
-        Rectangle muteRec = { panelRec.x + 200, panelRec.y + 25, 40, 40 };
-        Rectangle volumeSliderRec = { panelRec.x + 250, panelRec.y + 35, 120, 20 };
-
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            if (CheckCollisionPointRec(mousePos, closeRec)) {
-                showMusicPlayer = false;
-                PlaySound(buttonSfx);
-            } else if (CheckCollisionPointRec(mousePos, playPauseRec)) {
-                isMusicPaused = !isMusicPaused;
-                if (isMusicPaused) PauseMusicStream(musicPlaylist[currentMusicIndex]);
-                else ResumeMusicStream(musicPlaylist[currentMusicIndex]);
-                PlaySound(selectSfx);
-            } else if (CheckCollisionPointRec(mousePos, nextRec)) {
-                PlayNextSong();
-                PlaySound(selectSfx);
-            } else if (CheckCollisionPointRec(mousePos, prevRec)) {
-                PlayPreviousSong();
-                PlaySound(selectSfx);
-            } else if (CheckCollisionPointRec(mousePos, muteRec)) {
-                if (musicVolume > 0) musicVolume = 0;
-                else musicVolume = 0.5;
-                SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
-                PlaySound(selectSfx);
-            } else if (CheckCollisionPointRec(mousePos, volumeSliderRec)) {
-                isDraggingVolume = true;
-            }
-        }
-        
-        if (isDraggingVolume) {
-            musicVolume = (mousePos.x - volumeSliderRec.x) / volumeSliderRec.width;
-            if (musicVolume < 0.0f) musicVolume = 0.0f;
-            if (musicVolume > 1.0f) musicVolume = 1.0f;
-            SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
-        }
-        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
-            isDraggingVolume = false;
-        }
-    }
-
-
     switch (currentScreen) {
-        // Lógica de telas (MENU, GAMEPLAY, etc) - sem alterações significativas
+        // ... (toda a lógica do switch case permanece inalterada)
         case SCREEN_MENU: {
             Rectangle btnStart = { 691, 554, 538, 73 };
             Rectangle btnHowToPlay = { 691, 638, 538, 73 };
@@ -554,9 +379,9 @@ void UpdateDrawFrame(void) {
         } break;
         default: break;
     }
-    
-    // Animação da água (sem alterações)
+
     if (isWaterAnimating) {
+        // ... (toda a lógica de animação da água permanece inalterada)
         if (waterRiseDelayTimer > 0) waterRiseDelayTimer -= deltaTime;
         if (waterRiseDelayTimer <= 0 && waterLevel > TARGET_WATER_LEVEL) {
             waterLevel -= WATER_RISE_SPEED * deltaTime;
@@ -587,7 +412,8 @@ void UpdateDrawFrame(void) {
 
     // Lógica de Desenho das Telas (sem alterações)
     switch (currentScreen) {
-        case SCREEN_MENU: { DrawTexture(texMenu, 0, 0, WHITE); Rectangle btnStart = { 691, 554, 538, 73 }; Rectangle btnHowToPlay = { 691, 638, 538, 73 }; Rectangle btnLeaderboard = { 691, 722, 538, 73 }; Rectangle btnCredits = { 1612, 961, 259, 55 }; if (CheckCollisionPointRec(mousePos, btnStart)) DrawRectangleLinesEx(btnStart, 4, BLUE); if (CheckCollisionPointRec(mousePos, btnHowToPlay)) DrawRectangleLinesEx(btnHowToPlay, 4, BLUE); if (CheckCollisionPointRec(mousePos, btnLeaderboard)) DrawRectangleLinesEx(btnLeaderboard, 4, BLUE); if (CheckCollisionPointRec(mousePos, btnCredits)) DrawRectangleLinesEx(btnCredits, 4, BLUE); if (menuNotificationTimer > 0 && menuNotificationText != NULL) { float alpha = 1.0f; if (menuNotificationTimer < 0.5f) alpha = menuNotificationTimer / 0.5f; Vector2 textSize = MeasureTextEx(fontMontserrat, menuNotificationText, 35, 2); float rectWidth = textSize.x + 40; float rectHeight = textSize.y + 20; Rectangle notificationRect = {(SCREEN_WIDTH - rectWidth) / 2, 850, rectWidth, rectHeight}; DrawRectangleRec(notificationRect, Fade(BLACK, 0.7f * alpha)); DrawRectangleLinesEx(notificationRect, 2, Fade(WHITE, alpha)); DrawTextEx(fontMontserrat, menuNotificationText, (Vector2){notificationRect.x + 20, notificationRect.y + 10}, 35, 2, Fade(YELLOW, alpha)); } } break;
+        // ... (todo o código de desenho das telas permanece inalterado)
+         case SCREEN_MENU: { DrawTexture(texMenu, 0, 0, WHITE); Rectangle btnStart = { 691, 554, 538, 73 }; Rectangle btnHowToPlay = { 691, 638, 538, 73 }; Rectangle btnLeaderboard = { 691, 722, 538, 73 }; Rectangle btnCredits = { 1612, 961, 259, 55 }; if (CheckCollisionPointRec(mousePos, btnStart)) DrawRectangleLinesEx(btnStart, 4, BLUE); if (CheckCollisionPointRec(mousePos, btnHowToPlay)) DrawRectangleLinesEx(btnHowToPlay, 4, BLUE); if (CheckCollisionPointRec(mousePos, btnLeaderboard)) DrawRectangleLinesEx(btnLeaderboard, 4, BLUE); if (CheckCollisionPointRec(mousePos, btnCredits)) DrawRectangleLinesEx(btnCredits, 4, BLUE); if (menuNotificationTimer > 0 && menuNotificationText != NULL) { float alpha = 1.0f; if (menuNotificationTimer < 0.5f) alpha = menuNotificationTimer / 0.5f; Vector2 textSize = MeasureTextEx(fontMontserrat, menuNotificationText, 35, 2); float rectWidth = textSize.x + 40; float rectHeight = textSize.y + 20; Rectangle notificationRect = {(SCREEN_WIDTH - rectWidth) / 2, 850, rectWidth, rectHeight}; DrawRectangleRec(notificationRect, Fade(BLACK, 0.7f * alpha)); DrawRectangleLinesEx(notificationRect, 2, Fade(WHITE, alpha)); DrawTextEx(fontMontserrat, menuNotificationText, (Vector2){notificationRect.x + 20, notificationRect.y + 10}, 35, 2, Fade(YELLOW, alpha)); } } break;
         case SCREEN_HOW_TO_PLAY: { DrawTexture(texHowToPlay, 0, 0, WHITE); Rectangle btnBack = { 820, 911, 280, 70 }; if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE); } break;
         case SCREEN_CREDITS: { DrawTexture(texCredits, 0, 0, WHITE); Rectangle btnBack = { 820, 911, 280, 70 }; if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE); } break;
         case SCREEN_LEADERBOARD: { DrawTexture(texLeaderboard, 0, 0, WHITE); Rectangle btnBack = { 820, 911, 280, 70 }; if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE); int startY = 420; int stepY = 49; int nameCenterX = 958; int scoreX = 1120; int fontSize = 35; float spacing = 2.0f; for (int i = 0; i < LEADERBOARD_SIZE; i++) { const char* nameText = leaderboard[i].name; Vector2 nameTextSize = MeasureTextEx(fontMontserrat, nameText, fontSize, spacing); DrawTextEx(fontMontserrat, nameText, (Vector2){nameCenterX - (nameTextSize.x / 2), startY + (i * stepY)}, fontSize, spacing, BLACK); const char* scoreText = TextFormat("%03d", leaderboard[i].score); DrawTextEx(fontMontserrat, scoreText, (Vector2){scoreX, startY + (i * stepY)}, fontSize, spacing, BLACK); } } break;
@@ -597,77 +423,8 @@ void UpdateDrawFrame(void) {
         default: break;
     }
 
-    // Desenha a UI de volume por cima de todas as telas
-    DrawTexture(texMusicIcon, 20, SCREEN_HEIGHT - 70, WHITE);
-    if (showMusicPlayer) {
-        Rectangle panelRec = { 20, SCREEN_HEIGHT - 150, 400, 80 };
-        Rectangle closeRec = { panelRec.x + panelRec.width - 25, panelRec.y + 5, 20, 20 };
-        Rectangle prevRec = { panelRec.x + 30, panelRec.y + 25, 40, 40 };
-        Rectangle playPauseRec = { panelRec.x + 80, panelRec.y + 20, 50, 50 };
-        Rectangle nextRec = { panelRec.x + 140, panelRec.y + 25, 40, 40 };
-        Rectangle muteRec = { panelRec.x + 200, panelRec.y + 25, 40, 40 };
-        Rectangle volumeSliderRec = { panelRec.x + 250, panelRec.y + 35, 120, 20 };
-
-        DrawRectangleRec(panelRec, Fade(DARKGRAY, 0.8f));
-        DrawTexture(texClose, closeRec.x, closeRec.y, WHITE);
-        DrawTexture(texPrevious, prevRec.x, prevRec.y, WHITE);
-        if (isMusicPaused) DrawTexture(texPlay, playPauseRec.x, playPauseRec.y, WHITE);
-        else DrawTexture(texPause, playPauseRec.x, playPauseRec.y, WHITE);
-        DrawTexture(texNext, nextRec.x, nextRec.y, WHITE);
-        if (musicVolume <= 0.01f) DrawTexture(texMute, muteRec.x, muteRec.y, WHITE);
-        else DrawTexture(texUnmute, muteRec.x, muteRec.y, WHITE);
-        
-        DrawRectangleRec(volumeSliderRec, Fade(LIGHTGRAY, 0.8f));
-        DrawRectangle(volumeSliderRec.x, volumeSliderRec.y, (int)(volumeSliderRec.width * musicVolume), volumeSliderRec.height, BLUE);
-    }
+    // <<< DESENHA O MUSIC PLAYER (por cima de tudo) >>>
+    DrawMusicPlayer();
     
     EndDrawing();
-}
-
-//---------------------------------------------
-// Funções do Music Player
-//---------------------------------------------
-void PlayNextSong(void) {
-    StopMusicStream(musicPlaylist[currentMusicIndex]);
-
-    if (currentPlaylistPosition == -1) { // Estava tocando a música principal
-        ShuffleIntArray(playlistOrder, TOTAL_MUSICS - 1);
-        currentPlaylistPosition = 0;
-    } else {
-        currentPlaylistPosition++;
-        if (currentPlaylistPosition >= TOTAL_MUSICS - 1) { // Reinicia a playlist aleatória
-            ShuffleIntArray(playlistOrder, TOTAL_MUSICS - 1);
-            currentPlaylistPosition = 0;
-        }
-    }
-    
-    currentMusicIndex = playlistOrder[currentPlaylistPosition];
-    PlayMusicStream(musicPlaylist[currentMusicIndex]);
-    SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
-    if (isMusicPaused) PauseMusicStream(musicPlaylist[currentMusicIndex]);
-}
-
-void PlayPreviousSong(void) {
-    // Se a música atual tocou por mais de 3 segundos, reinicia ela. Senão, volta para a anterior.
-    if (GetMusicTimePlayed(musicPlaylist[currentMusicIndex]) > 3.0f) {
-        StopMusicStream(musicPlaylist[currentMusicIndex]);
-        PlayMusicStream(musicPlaylist[currentMusicIndex]);
-        SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
-        if (isMusicPaused) PauseMusicStream(musicPlaylist[currentMusicIndex]);
-        return;
-    }
-
-    StopMusicStream(musicPlaylist[currentMusicIndex]);
-
-    if (currentPlaylistPosition <= 0) { // Se está na primeira da lista ou na principal, volta pra principal
-        currentPlaylistPosition = -1;
-        currentMusicIndex = 0;
-    } else {
-        currentPlaylistPosition--;
-        currentMusicIndex = playlistOrder[currentPlaylistPosition];
-    }
-    
-    PlayMusicStream(musicPlaylist[currentMusicIndex]);
-    SetMusicVolume(musicPlaylist[currentMusicIndex], musicVolume);
-    if (isMusicPaused) PauseMusicStream(musicPlaylist[currentMusicIndex]);
 }

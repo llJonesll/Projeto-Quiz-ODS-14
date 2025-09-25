@@ -72,7 +72,7 @@ GOTO nextStep
 
 :compile
 ECHO Compiling...
-gcc src/main.c icon.o -o Projeto-Quiz-ODS-14.exe -O1 -Wall -Wextra -Wno-unused-parameter -pedantic-errors -std=c99 -Wno-missing-braces -I src/include/ -L lib/ -lraylib -lopengl32 -lgdi32 -lwinmm
+gcc src/quiz_ods14.c src/music_player.c icon.o -o Projeto-Quiz-ODS-14.exe -O1 -Wall -Wextra -Wno-unused-parameter -pedantic-errors -std=c99 -Wno-missing-braces -I src/include/ -I src/ -L lib/ -lraylib -lopengl32 -lgdi32 -lwinmm
 GOTO nextStep
 
 :run
