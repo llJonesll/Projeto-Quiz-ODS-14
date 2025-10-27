@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "cjson.h": "c",
+        "leaderboard.h": "c",
+        "curl.h": "c"
+    }
+}

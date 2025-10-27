@@ -2,32 +2,32 @@
  * @file quiz_ods14.c
  * @author Grupo 1
  * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
- * @version 5.4.1
+ * @version 5.5.1
  * @copyright Copyright (c) 2025
  *
- * @note Mudanças da v5.4.1 (Correção):
- * - Restaurado o bloco de código que desenha a tela de Menu Principal,
- * que foi acidentalmente omitido novamente.
+ * @note Mudanças da v5.5.1 (Correção):
+ * - Restaurado NOVAMENTE o bloco de código que desenha a tela de Menu Principal.
  */
 
 #include "raylib/raylib.h"
-#include "raylib/music_player.h" 
+#include "raylib/music_player.h"
 #include "raylib/water_fx.h"
 #include "raylib/questions.h"
 #include "raylib/leaderboard.h"
+#include "raylib/scoring.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-#include <time.h> 
-#include <math.h> 
+#include <time.h>
+#include <math.h>
 
 //---------------------------------------------
 // Definições e Constantes do Jogo
 //---------------------------------------------
 #define SCREEN_WIDTH 1920
 #define SCREEN_HEIGHT 1080
-#define QUESTION_TIME 15.0f
+// QUESTION_TIME agora está em scoring.h
 
 //---------------------------------------------
 // Tipos Customizados do Jogo
@@ -40,7 +40,7 @@ typedef enum { SCREEN_MENU, SCREEN_HOW_TO_PLAY, SCREEN_LEADERBOARD, SCREEN_CREDI
 static GameScreen currentScreen = SCREEN_MENU;
 static int questionOrder[QUIZ_QUESTION_COUNT];
 static int currentQuestionIndex = 0;
-static int playerScore = 0;
+// static int playerScore = 0; // Gerenciado por scoring.c
 static int selectedAnswer = -1;
 static bool isAnswerCorrect = false;
 static float answerTimer = 0.0f;
@@ -51,7 +51,7 @@ static Font fontMontserrat;
 static float questionTimer;
 static int pointsGainedNotification = 0;
 static float notificationTimer = 0.0f;
-static Music rainMusic; 
+static Music rainMusic;
 static Sound selectSfx, buttonSfx, correctSfx, wrongSfx, typeSfx, victorySfx;
 static bool isHoveringBtnStart = false, isHoveringBtnHowToPlay = false, isHoveringBtnLeaderboard = false, isHoveringBtnCredits = false, isHoveringBtnBack = false, isHoveringBtnExit = false;
 static bool hasVisitedHowToPlay = false;
@@ -74,17 +74,17 @@ void GoToMenu(void) {
     currentScreen = SCREEN_MENU;
 }
 
-void StartGame() { 
-    SelectAndShuffleQuizQuestions(questionOrder); 
-    currentQuestionIndex = 0; 
-    playerScore = 0; 
-    selectedAnswer = -1; 
-    currentScreen = SCREEN_GAMEPLAY; 
-    questionTimer = QUESTION_TIME; 
+void StartGame() {
+    SelectAndShuffleQuizQuestions(questionOrder);
+    currentQuestionIndex = 0;
+    ResetPlayerScore();
+    selectedAnswer = -1;
+    currentScreen = SCREEN_GAMEPLAY;
+    questionTimer = QUESTION_TIME;
 }
 
-void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float fontSize, float textSpacing, Color color) { 
-    char textToProcess[1024]; strcpy(textToProcess, text); char lines[20][256]; int lineCount = 0; char *textCopy = (char*)MemAlloc(strlen(textToProcess) + 1); strcpy(textCopy, textToProcess); char *word = strtok(textCopy, " "); char currentLine[256] = { 0 }; while (word != NULL) { char testLine[256]; strcpy(testLine, currentLine); if (strlen(currentLine) > 0) strcat(testLine, " "); strcat(testLine, word); if (MeasureTextEx(font, testLine, fontSize, textSpacing).x > rec.width) { strcpy(lines[lineCount], currentLine); lineCount++; strcpy(currentLine, word); } else { strcpy(currentLine, testLine); } word = strtok(NULL, " "); } strcpy(lines[lineCount], currentLine); lineCount++; MemFree(textCopy); float totalTextHeight = lineCount * fontSize + (lineCount - 1) * textSpacing; float startY = rec.y + (rec.height - totalTextHeight) / 2; for (int i = 0; i < lineCount; i++) { float lineWidth = MeasureTextEx(font, lines[i], fontSize, textSpacing).x; float startX = rec.x + (rec.width - lineWidth) / 2; DrawTextEx(font, lines[i], (Vector2){startX, startY + i * (fontSize + textSpacing)}, fontSize, textSpacing, color); } 
+void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float fontSize, float textSpacing, Color color) {
+    char textToProcess[1024]; strcpy(textToProcess, text); char lines[20][256]; int lineCount = 0; char *textCopy = (char*)MemAlloc(strlen(textToProcess) + 1); strcpy(textCopy, textToProcess); char *word = strtok(textCopy, " "); char currentLine[256] = { 0 }; while (word != NULL) { char testLine[256]; strcpy(testLine, currentLine); if (strlen(currentLine) > 0) strcat(testLine, " "); strcat(testLine, word); if (MeasureTextEx(font, testLine, fontSize, textSpacing).x > rec.width) { strcpy(lines[lineCount], currentLine); lineCount++; strcpy(currentLine, word); } else { strcpy(currentLine, testLine); } word = strtok(NULL, " "); } strcpy(lines[lineCount], currentLine); lineCount++; MemFree(textCopy); float totalTextHeight = lineCount * fontSize + (lineCount - 1) * textSpacing; float startY = rec.y + (rec.height - totalTextHeight) / 2; for (int i = 0; i < lineCount; i++) { float lineWidth = MeasureTextEx(font, lines[i], fontSize, textSpacing).x; float startX = rec.x + (rec.width - lineWidth) / 2; DrawTextEx(font, lines[i], (Vector2){startX, startY + i * (fontSize + textSpacing)}, fontSize, textSpacing, color); }
 }
 
 //---------------------------------------------
@@ -118,6 +118,7 @@ int main(void) {
     InitWaterFx();
     InitializeQuestions();
     InitLeaderboard();
+    ResetPlayerScore();
     
     while (!WindowShouldClose()) {
         UpdateDrawFrame();
@@ -225,7 +226,7 @@ void UpdateDrawFrame(void) {
         case SCREEN_SHOW_ANSWER:
         case SCREEN_GAME_OVER: {
             if (currentScreen == SCREEN_ENTER_NAME) {
-                if (IsWaterAnimationFinished()) {
+                 if (IsWaterAnimationFinished()) {
                     int key = GetKeyPressed();
                     if ((key >= KEY_A && key <= KEY_Z) && (nameCharCount < MAX_NAME_LENGTH)) {
                         PlaySound(typeSfx); playerName[nameCharCount++] = (char)key; playerName[nameCharCount] = '\0';
@@ -241,16 +242,11 @@ void UpdateDrawFrame(void) {
                     PlaySound(wrongSfx); isAnswerCorrect = false; selectedAnswer = -1; currentScreen = SCREEN_SHOW_ANSWER; answerTimer = 2.0f;
                 }
                 Rectangle optionClickRects[4] = { { 150, 500, 570, 80 }, { 1200, 500, 570, 80 }, { 150, 720, 570, 80 }, { 1200, 720, 570, 80 } };
+                bool answerConfirmed = false;
                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                     for (int i = 0; i < 4; i++) {
                         if (CheckCollisionPointRec(mousePos, optionClickRects[i])) {
-                            selectedAnswer = i; PlaySound(selectSfx); 
-                            Question q = GetQuestionFromOrder(questionOrder[currentQuestionIndex]);
-                            isAnswerCorrect = (selectedAnswer == q.correctOption);
-                            if (isAnswerCorrect) { PlaySound(correctSfx); playerScore += q.points; pointsGainedNotification = q.points; notificationTimer = 2.0f; } 
-                            else { PlaySound(wrongSfx); }
-                            currentScreen = SCREEN_SHOW_ANSWER; answerTimer = 2.0f;
-                            break; 
+                            selectedAnswer = i; PlaySound(selectSfx); answerConfirmed = true; break; 
                         }
                     }
                 }
@@ -258,18 +254,25 @@ void UpdateDrawFrame(void) {
                 if (IsKeyPressed(KEY_A)) keyPressed = 0; if (IsKeyPressed(KEY_B)) keyPressed = 1;
                 if (IsKeyPressed(KEY_C)) keyPressed = 2; if (IsKeyPressed(KEY_D)) keyPressed = 3;
                 if (keyPressed != -1) { selectedAnswer = keyPressed; PlaySound(selectSfx); }
-                if (IsKeyPressed(KEY_ENTER) && selectedAnswer != -1) {
+                if (IsKeyPressed(KEY_ENTER) && selectedAnswer != -1) { answerConfirmed = true; }
+
+                if (answerConfirmed) {
                     Question q = GetQuestionFromOrder(questionOrder[currentQuestionIndex]);
                     isAnswerCorrect = (selectedAnswer == q.correctOption);
-                    if (isAnswerCorrect) { PlaySound(correctSfx); playerScore += q.points; pointsGainedNotification = q.points; notificationTimer = 2.0f; } 
-                    else { PlaySound(wrongSfx); }
+                    if (isAnswerCorrect) {
+                        PlaySound(correctSfx); 
+                        int pointsEarned = CalculatePointsEarned(q, questionTimer);
+                        AddToPlayerScore(pointsEarned);
+                        pointsGainedNotification = pointsEarned; 
+                        notificationTimer = 2.0f;
+                    } else { PlaySound(wrongSfx); }
                     currentScreen = SCREEN_SHOW_ANSWER; answerTimer = 2.0f;
                 }
             } else if (currentScreen == SCREEN_SHOW_ANSWER) {
                 answerTimer -= deltaTime;
                 if (answerTimer <= 0) {
                     currentQuestionIndex++; selectedAnswer = -1;
-                    if (currentQuestionIndex >= QUIZ_QUESTION_COUNT) { UpdateLeaderboard(playerName, playerScore); currentScreen = SCREEN_GAME_OVER; } 
+                    if (currentQuestionIndex >= QUIZ_QUESTION_COUNT) { UpdateLeaderboard(playerName, GetPlayerScore()); currentScreen = SCREEN_GAME_OVER; } 
                     else { currentScreen = SCREEN_GAMEPLAY; questionTimer = QUESTION_TIME; }
                 }
             } else if (currentScreen == SCREEN_GAME_OVER) {
@@ -306,7 +309,6 @@ void UpdateDrawFrame(void) {
                 DrawTextEx(fontMontserrat, menuNotificationText, (Vector2){notificationRect.x + 20, notificationRect.y + 10}, 35, 2, Fade(YELLOW, alpha));
             }
         } break;
-        // <<< BLOCOS DE DESENHO RESTAURADOS >>>
         case SCREEN_HOW_TO_PLAY: { DrawTexture(texHowToPlay, 0, 0, WHITE); Rectangle btnBack = { 820, 911, 280, 70 }; if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE); } break;
         case SCREEN_CREDITS: { DrawTexture(texCredits, 0, 0, WHITE); Rectangle btnBack = { 820, 911, 280, 70 }; if (CheckCollisionPointRec(mousePos, btnBack)) DrawRectangleLinesEx(btnBack, 4, BLUE); } break;
         case SCREEN_LEADERBOARD: { 
@@ -324,8 +326,8 @@ void UpdateDrawFrame(void) {
             } 
         } break;
         case SCREEN_ENTER_NAME: { DrawWaterFx(currentTime); const char* title = "Tudo pronto para comecar!"; const char* subtitle = "Aguarde a maré subir..."; if (IsWaterAnimationFinished()) { subtitle = "Digite suas iniciais (3 letras):"; } DrawTextEx(fontMontserrat, title, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, title, 60, 2).x/2, 300}, 60, 2, RAYWHITE); DrawTextEx(fontMontserrat, subtitle, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, subtitle, 40, 2).x/2, 500}, 40, 2, LIGHTGRAY); if (IsWaterAnimationFinished()) { const char* hint = "Pressione ENTER para iniciar o quiz"; DrawRectangle(SCREEN_WIDTH/2 - 150, 560, 300, 80, RAYWHITE); DrawRectangleLines(SCREEN_WIDTH/2 - 150, 560, 300, 80, DARKGRAY); DrawTextEx(fontMontserrat, playerName, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, playerName, 60, 2).x/2, 570}, 60, 2, DARKBLUE); if (nameCharCount < MAX_NAME_LENGTH && ((int)(GetTime()*2.0f)) % 2 == 0) { Vector2 textSize = MeasureTextEx(fontMontserrat, playerName, 60, 2); DrawTextEx(fontMontserrat, "_", (Vector2){SCREEN_WIDTH/2 - textSize.x/2 + textSize.x, 570}, 60, 2, DARKBLUE); } DrawTextEx(fontMontserrat, hint, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY); } } break;
-        case SCREEN_GAMEPLAY: case SCREEN_SHOW_ANSWER: { DrawTexture(texQuestion, 0, 0, WHITE); DrawWaterFx(currentTime); if (currentScreen == SCREEN_GAMEPLAY) { float timerPercentage = questionTimer / QUESTION_TIME; if (timerPercentage < 0) timerPercentage = 0; float barWidth = 800; float barX = (SCREEN_WIDTH - barWidth) / 2; Color timerColor = GREEN; if (timerPercentage < 0.5f) timerColor = YELLOW; if (timerPercentage < 0.25f) timerColor = RED; DrawRectangle(barX, 80, barWidth, 30, Fade(DARKGRAY, 0.8f)); DrawRectangle(barX, 80, barWidth * timerPercentage, 30, timerColor); DrawRectangleLines(barX, 80, barWidth, 30, DARKBLUE); } Question q = GetQuestionFromOrder(questionOrder[currentQuestionIndex]); Rectangle questionRec = { 157, 243, 1595, 155 }; DrawTextWrappedCentered(fontMontserrat, q.questionText, questionRec, 40, 5, WHITE); Rectangle optionTextRects[4] = { {215, 505, 500, 72}, {1262, 506, 500, 72}, {217, 726, 500, 72}, {1258, 732, 500, 72} }; const char* optionLetters[] = {"A", "B", "C", "D"}; Vector2 letterPositions[] = { {157, 503}, {1204, 504}, {159, 724}, {1200, 730} }; for (int i = 0; i < 4; i++) { Color letterColor = WHITE; if (currentScreen == SCREEN_GAMEPLAY) { if (i == selectedAnswer) letterColor = YELLOW; } else if (currentScreen == SCREEN_SHOW_ANSWER) { if (i == q.correctOption) letterColor = GREEN; else if (i == selectedAnswer && !isAnswerCorrect) letterColor = RED; else if (selectedAnswer == -1 && i == q.correctOption) letterColor = ORANGE; } DrawTextEx(fontMontserrat, optionLetters[i], letterPositions[i], 73, 2.0f, letterColor); DrawTextWrappedCentered(fontMontserrat, q.options[i], optionTextRects[i], 36, 3, WHITE); } const char* questionTextStr = TextFormat("Questao: %02d/%d", currentQuestionIndex + 1, QUIZ_QUESTION_COUNT); DrawTextEx(fontMontserrat, questionTextStr, (Vector2){40, 30}, 40, 2.0f, DARKBLUE); const char* difficultyText; Color difficultyColor; switch(q.difficulty) { case EASY: difficultyText = "FACIL"; difficultyColor = GREEN; break; case MEDIUM: difficultyText = "MEDIA"; difficultyColor = YELLOW; break; case HARD: difficultyText = "DIFICIL"; difficultyColor = RED; break; } DrawTextEx(fontMontserrat, difficultyText, (Vector2){40, 85}, 30, 2.0f, difficultyColor); DrawTexture(texLogo, 0, 0, WHITE); const char* scoreText = TextFormat("Pontos: %03d", playerScore); DrawTextEx(fontMontserrat, scoreText, (Vector2){1650, 30}, 40, 2.0f, DARKBLUE); if (notificationTimer > 0) { const char* notificationText = TextFormat("+%d PONTOS", pointsGainedNotification); Vector2 scoreTextSize = MeasureTextEx(fontMontserrat, scoreText, 40, 2.0f); Vector2 notificationTextSize = MeasureTextEx(fontMontserrat, notificationText, 25, 2.0f); float alpha = notificationTimer / 2.0f; DrawTextEx(fontMontserrat, notificationText, (Vector2){1650 + (scoreTextSize.x - notificationTextSize.x) / 2, 30 + 45}, 25, 2.0f, Fade(GREEN, alpha)); } } break;
-        case SCREEN_GAME_OVER: { DrawWaterFx(currentTime); const char* title = "FIM DE JOGO!"; const char* scoreText = TextFormat("Sua pontuacao final: %d", playerScore); const char* hint = "Pressione ENTER para ver o placar"; DrawTextEx(fontMontserrat, title, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, title, 80, 2).x/2, 350}, 80, 2, RAYWHITE); DrawTextEx(fontMontserrat, scoreText, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, scoreText, 50, 2).x/2, 500}, 50, 2, RAYWHITE); DrawTextEx(fontMontserrat, hint, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY); } break;
+        case SCREEN_GAMEPLAY: case SCREEN_SHOW_ANSWER: { DrawTexture(texQuestion, 0, 0, WHITE); DrawWaterFx(currentTime); if (currentScreen == SCREEN_GAMEPLAY) { float timerPercentage = questionTimer / QUESTION_TIME; if (timerPercentage < 0) timerPercentage = 0; float barWidth = 800; float barX = (SCREEN_WIDTH - barWidth) / 2; Color timerColor = GREEN; if (timerPercentage < 0.5f) timerColor = YELLOW; if (timerPercentage < 0.25f) timerColor = RED; DrawRectangle(barX, 80, barWidth, 30, Fade(DARKGRAY, 0.8f)); DrawRectangle(barX, 80, barWidth * timerPercentage, 30, timerColor); DrawRectangleLines(barX, 80, barWidth, 30, DARKBLUE); } Question q = GetQuestionFromOrder(questionOrder[currentQuestionIndex]); Rectangle questionRec = { 157, 243, 1595, 155 }; DrawTextWrappedCentered(fontMontserrat, q.questionText, questionRec, 40, 5, WHITE); Rectangle optionTextRects[4] = { {215, 505, 500, 72}, {1262, 506, 500, 72}, {217, 726, 500, 72}, {1258, 732, 500, 72} }; const char* optionLetters[] = {"A", "B", "C", "D"}; Vector2 letterPositions[] = { {157, 503}, {1204, 504}, {159, 724}, {1200, 730} }; for (int i = 0; i < 4; i++) { Color letterColor = WHITE; if (currentScreen == SCREEN_GAMEPLAY) { if (i == selectedAnswer) letterColor = YELLOW; } else if (currentScreen == SCREEN_SHOW_ANSWER) { if (i == q.correctOption) letterColor = GREEN; else if (i == selectedAnswer && !isAnswerCorrect) letterColor = RED; else if (selectedAnswer == -1 && i == q.correctOption) letterColor = ORANGE; } DrawTextEx(fontMontserrat, optionLetters[i], letterPositions[i], 73, 2.0f, letterColor); DrawTextWrappedCentered(fontMontserrat, q.options[i], optionTextRects[i], 36, 3, WHITE); } const char* questionTextStr = TextFormat("Questao: %02d/%d", currentQuestionIndex + 1, QUIZ_QUESTION_COUNT); DrawTextEx(fontMontserrat, questionTextStr, (Vector2){40, 30}, 40, 2.0f, DARKBLUE); const char* difficultyText; Color difficultyColor; switch(q.difficulty) { case EASY: difficultyText = "FACIL"; difficultyColor = GREEN; break; case MEDIUM: difficultyText = "MEDIA"; difficultyColor = YELLOW; break; case HARD: difficultyText = "DIFICIL"; difficultyColor = RED; break; } DrawTextEx(fontMontserrat, difficultyText, (Vector2){40, 85}, 30, 2.0f, difficultyColor); DrawTexture(texLogo, 0, 0, WHITE); const char* scoreText = TextFormat("Pontos: %03d", GetPlayerScore()); DrawTextEx(fontMontserrat, scoreText, (Vector2){1650, 30}, 40, 2.0f, DARKBLUE); if (notificationTimer > 0) { const char* notificationText = TextFormat("+%d PONTOS", pointsGainedNotification); Vector2 scoreTextSize = MeasureTextEx(fontMontserrat, scoreText, 40, 2.0f); Vector2 notificationTextSize = MeasureTextEx(fontMontserrat, notificationText, 25, 2.0f); float alpha = notificationTimer / 2.0f; DrawTextEx(fontMontserrat, notificationText, (Vector2){1650 + (scoreTextSize.x - scoreTextSize.x) / 2, 30 + 45}, 25, 2.0f, Fade(GREEN, alpha)); } } break;
+        case SCREEN_GAME_OVER: { DrawWaterFx(currentTime); const char* title = "FIM DE JOGO!"; const char* scoreText = TextFormat("Sua pontuacao final: %d", GetPlayerScore()); const char* hint = "Pressione ENTER para ver o placar"; DrawTextEx(fontMontserrat, title, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, title, 80, 2).x/2, 350}, 80, 2, RAYWHITE); DrawTextEx(fontMontserrat, scoreText, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, scoreText, 50, 2).x/2, 500}, 50, 2, RAYWHITE); DrawTextEx(fontMontserrat, hint, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY); } break;
         default: break;
     }
 
