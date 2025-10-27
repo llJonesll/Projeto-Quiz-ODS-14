@@ -1,5 +1,5 @@
 # README
 
-Para acessar o projeto pré melhorias da SNCT: https://downgit.github.io/#/home?url=https://github.com/llJonesll/Projeto-Quiz-ODS-14/tree/df7f103bfef9cf5681e1ef687871af1103da382d/PROJETO%20PR%C3%89%20SNCT!!
+Para acessar o projeto pré melhorias da SNCT: https://github.com/llJonesll/Projeto-Quiz-ODS-14/tree/8d10b0367b333a0168dc9bb0a4c7ae329639f107
 
-Para jogar, baixe e inicie o executavel.
+Para jogar, baixe o zip e inicie o executavel.
