@@ -26,4 +26,5 @@ void UpdateLeaderboard(const char* newName, int newScore);
 // Retorna um ponteiro constante para os dados do placar para desenho.
 const PlayerScore* GetLeaderboard(void);
 
+int GetPlayerRank(int finalScore);
 #endif // LEADERBOARD_H
