@@ -2,13 +2,15 @@
  * @file quiz_ods14.c
  * @author Grupo 1
  * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
- * @version 5.7.1
+ * @version 5.7.2
  * @copyright Copyright (c) 2025
  *
- * @note Mudanças da v5.7.1 (Correção Geral):
+ * @note Mudanças da v5.7.2 (Lógica de Ranking):
  * - Corrigidos #includes que estavam em uma única linha.
  * - Corrigida linha 326 (SCREEN_ENTER_NAME) que estava truncada.
  * - Corrigidos todos os warnings de compilação (indentação, variáveis não usadas, etc).
+ * - Aprimorada a lógica de fim de jogo para exibir corretamente o rank do jogador
+ * e a mensagem "atrás de quem" usando GetPlayerRank() do Firebase.
  */
 
 // <<< CORREÇÃO: INCLUDES SEPARADOS EM LINHAS PRÓPRIAS >>>
@@ -85,7 +87,7 @@ void GoToMenu(void) {
     if (IsMusicStreamPlaying(rainMusic)) StopMusicStream(rainMusic);
     ResetWaterFx();
     currentScreen = SCREEN_MENU;
-    rankMessage[0] = '\0'; 
+    rankMessage[0] = '\0'; // Limpa a mensagem de rank ao voltar ao menu
 }
 
 void StartGame() { 
@@ -343,21 +345,46 @@ void UpdateDrawFrame(void) {
                 answerTimer -= deltaTime;
                 if (answerTimer <= 0) {
                     currentQuestionIndex++; selectedAnswer = -1;
+                    
                     if (currentQuestionIndex >= QUIZ_QUESTION_COUNT) { 
+                        // =========================================================
+                        // ==== INÍCIO DA NOVA LÓGICA DE RANKING (SUBSTITUÍDA) ====
+                        // =========================================================
+                        
                         int finalScore = GetPlayerScore();
+                        
+                        // 1. Envia o score e ATUALIZA a lista local do Top 6
+                        //    (Isso é importante para o passo 3)
                         UpdateLeaderboard(playerName, finalScore);
                         
-                        const PlayerScore* top6 = GetLeaderboard();
-                        if (finalScore <= top6[LEADERBOARD_SIZE - 1].score) {
-                            int rank = GetPlayerRank(finalScore);
-                            if (rank > 0) {
-                                snprintf(rankMessage, sizeof(rankMessage), "Voce esta em %dº POS atras de %s!!", rank, top6[LEADERBOARD_SIZE - 1].name);
-                            } else {
-                                rankMessage[0] = '\0';
-                            }
+                        // 2. Pergunta ao Firebase qual é o nosso rank VERDADEIRO
+                        //    (Ex: pode retornar 8, 10, 20... etc.)
+                        int rank = GetPlayerRank(finalScore); 
+
+                        // 3. Pega a lista local do Top 6 (que já foi atualizada)
+                        const PlayerScore* top6 = GetLeaderboard(); 
+
+                        // 4. LÓGICA DA MENSAGEM:
+                        if (rank > LEADERBOARD_SIZE && rank > 0) {
+                            // Se nosso rank (ex: 7º, 8º) for PIOR que o 6º lugar...
+                            // ...nós mostramos a mensagem de "atrás de quem".
+                            // (top6[LEADERBOARD_SIZE - 1] é o 6º colocado)
+                            snprintf(rankMessage, sizeof(rankMessage), 
+                                     "Voce ficou em %dº, atras de %s (%d pts)!", 
+                                     rank, 
+                                     top6[LEADERBOARD_SIZE - 1].name,  // Nome do 6º colocado
+                                     top6[LEADERBOARD_SIZE - 1].score  // Pontos do 6º colocado
+                            );
                         } else {
+                            // Se nosso rank for entre 1º e 6º, nós estamos no placar!
+                            // Ou se GetPlayerRank falhou (retornou -1)
+                            // Não precisa de mensagem, nosso nome já vai aparecer.
                             rankMessage[0] = '\0';
                         }
+                        
+                        // =========================================================
+                        // ==== FIM DA NOVA LÓGICA DE RANKING ====
+                        // =========================================================
                         
                         currentScreen = SCREEN_GAME_OVER; 
                     } 
@@ -411,7 +438,7 @@ void UpdateDrawFrame(void) {
                 const char* scoreText = TextFormat("%03d", leaderboard[i].score); 
                 DrawTextEx(fontMontserrat, scoreText, (Vector2){scoreX, startY + (i * stepY)}, fontSize, spacing, BLACK); 
             } 
-            if (rankMessage[0] != '\0') {
+            if (rankMessage[0] != '\0') { // <<< DESENHA A MENSAGEM SE ELA EXISTIR
                 Vector2 textSize = MeasureTextEx(fontMontserrat, rankMessage, 30, 2);
                 DrawTextEx(fontMontserrat, rankMessage, (Vector2){(SCREEN_WIDTH - textSize.x) / 2, 750}, 30, 2, BLACK);
             }
