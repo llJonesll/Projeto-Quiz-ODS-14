@@ -2,12 +2,8 @@
  * @file music_player.c
  * @author Grupo 1
  * @brief Implementação do Music Player com UI animada para o Quiz ODS 14.
- * @version 3.0.1
+ * @version 3.1
  * @copyright Copyright (c) 2025
- *
- * @note Mudanças da v3.0.1 (Correção de Warnings):
- * - Removida variável não utilizada 'infoPanelRec' da função Update.
- * - Aumentado o buffer de 'FormatTime' de 6 para 12 para corrigir aviso de 'format-overflow'.
  */
 
 #include "raylib/raylib.h"
@@ -19,9 +15,6 @@
 #define TOTAL_MUSICS 6
 #define ANIMATION_SPEED 0.35f
 
-//---------------------------------------------
-// Tipos e Estruturas
-//---------------------------------------------
 typedef enum {
     STATE_HIDDEN,
     STATE_ANIMATING_IN,
@@ -34,9 +27,6 @@ typedef struct {
     const char *artist;
 } SongInfo;
 
-//---------------------------------------------
-// Variáveis Estáticas
-//---------------------------------------------
 static Music musicPlaylist[TOTAL_MUSICS];
 static SongInfo songInfo[TOTAL_MUSICS];
 static int playlistOrder[TOTAL_MUSICS - 1];
@@ -57,16 +47,11 @@ static AnimationState sliderState = STATE_HIDDEN;
 static float playerAnimationTimer = 0.0f;
 static float sliderAnimationTimer = 0.0f;
 
-// Protótipos de funções internas
 static void ShuffleIntArray(int *array, int size);
 static void PlayNextSong(void);
 static void PlayPreviousSong(void);
 static float Clamp(float value, float min, float max);
 static const char* FormatTime(float seconds);
-
-//---------------------------------------------
-// Implementação das Funções Públicas
-//---------------------------------------------
 
 void InitMusicPlayer(void) {
     musicPlaylist[0] = LoadMusicStream("resources/musics/bg_music.wav");
@@ -101,6 +86,10 @@ void InitMusicPlayer(void) {
 }
 
 void UpdateMusicPlayer(void) {
+    UpdateMusicPlayerCustomMouse(GetMousePosition());
+}
+
+void UpdateMusicPlayerCustomMouse(Vector2 mousePos) {
     float deltaTime = GetFrameTime();
     
     if (!isMusicPaused) {
@@ -149,7 +138,6 @@ void UpdateMusicPlayer(void) {
         }
     }
     
-    Vector2 mousePos = GetMousePosition();
     float playerProgress = playerAnimationTimer / ANIMATION_SPEED;
     float locomotiveX = -60.0f + ((22.0f - -60.0f) * playerProgress);
     float togglerX = 22.0f + ((341.0f - 22.0f) * playerProgress);
@@ -164,7 +152,6 @@ void UpdateMusicPlayer(void) {
     float infoPanelWidth = 405.0f - 121.0f;
     float infoPanelStartX = - (infoPanelWidth + 20);
     float infoPanelCurrentX = infoPanelStartX + (infoPanelFinalX - infoPanelStartX) * playerProgress;
-    // Rectangle infoPanelRec = { infoPanelCurrentX, 820, infoPanelWidth, 120 }; // <<< CORREÇÃO DE WARNING (Removida)
     Rectangle progressBarRec = { infoPanelCurrentX + (132 - 121), 820 + (890 - 820), 263, 7 };
     
     float sliderProgress = sliderAnimationTimer / ANIMATION_SPEED;
@@ -315,7 +302,6 @@ void DrawMusicPlayer(void) {
     }
 }
 
-
 void UnloadMusicPlayer(void) {
     for (int i = 0; i < TOTAL_MUSICS; i++) {
         UnloadMusicStream(musicPlaylist[i]);
@@ -333,9 +319,9 @@ void UnloadMusicPlayer(void) {
 void UpdateMusicVolume(void) {
     float scaledVolume;
     if (musicVolume <= 0.5f) {
-        scaledVolume = musicVolume * 2.0f; // Mapeia 0.0-0.5 para 0.0-1.0
+        scaledVolume = musicVolume * 2.0f; 
     } else {
-        scaledVolume = 1.0f + (musicVolume - 0.5f); // Mapeia 0.5-1.0 para 1.5
+        scaledVolume = 1.0f + (musicVolume - 0.5f); 
     }
     SetMusicVolume(musicPlaylist[currentMusicIndex], scaledVolume);
 }
@@ -408,7 +394,6 @@ static const char* FormatTime(float seconds) {
     int minutes = (int)seconds / 60;
     int secs = (int)seconds % 60;
     
-    // <<< CORREÇÃO DE WARNING (Buffer aumentado) >>>
     static char timeText[12];
     sprintf(timeText, "%d:%02d", minutes, secs);
     return timeText;

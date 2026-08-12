@@ -1,19 +1,11 @@
 /**
  * @file quiz_ods14.c
  * @author Grupo 1
- * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib.
- * @version 5.7.2
+ * @brief Jogo de Quiz completo sobre a ODS 14 usando Raylib com resolução adaptativa (Virtual Resolution).
+ * @version 6.1
  * @copyright Copyright (c) 2025
- *
- * @note Mudanças da v5.7.2 (Lógica de Ranking):
- * - Corrigidos #includes que estavam em uma única linha.
- * - Corrigida linha 326 (SCREEN_ENTER_NAME) que estava truncada.
- * - Corrigidos todos os warnings de compilação (indentação, variáveis não usadas, etc).
- * - Aprimorada a lógica de fim de jogo para exibir corretamente o rank do jogador
- * e a mensagem "atrás de quem" usando GetPlayerRank() do Firebase.
  */
 
-// <<< CORREÇÃO: INCLUDES SEPARADOS EM LINHAS PRÓPRIAS >>>
 #include "raylib/raylib.h"
 #include "raylib/music_player.h" 
 #include "raylib/water_fx.h"
@@ -23,17 +15,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <string.h> // Incluído para strcpy, strlen, etc.
+#include <string.h>
 #include <time.h> 
 #include <math.h> 
-// <stddef.h> é incluído por raylib.h, então NULL é conhecido
 
 //---------------------------------------------
-// Definições e Constantes do Jogo
+// Definições de Resolução
 //---------------------------------------------
-#define SCREEN_WIDTH 1920
-#define SCREEN_HEIGHT 1080
-// QUESTION_TIME agora está em scoring.h
+#define GAME_WIDTH 1920   // Resolução virtual interna do jogo
+#define GAME_HEIGHT 1080
 
 //---------------------------------------------
 // Tipos Customizados do Jogo
@@ -59,7 +49,6 @@ static float notificationTimer = 0.0f;
 static Music rainMusic; 
 static Sound selectSfx, buttonSfx, correctSfx, wrongSfx, typeSfx, victorySfx;
 
-// <<< VARIÁVEIS DE HOVER CORRIGIDAS (REMOVIDAS AS NÃO UTILIZADAS) >>>
 static bool isHoveringBtnStart = false;
 static bool isHoveringBtnHowToPlay = false;
 static bool isHoveringBtnLeaderboard = false;
@@ -73,10 +62,13 @@ static float menuNotificationTimer = 0.0f;
 
 static char rankMessage[100] = { 0 };
 
+// Canvas Virtual para resolução adaptativa
+static RenderTexture2D targetCanvas;
+
 //---------------------------------------------
 // Protótipos de Funções
 //---------------------------------------------
-void UpdateDrawFrame(void);
+void UpdateDrawFrame(Vector2 mouseVirtualPos);
 void GoToMenu(void);
 void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float fontSize, float spacing, Color color);
 
@@ -87,7 +79,7 @@ void GoToMenu(void) {
     if (IsMusicStreamPlaying(rainMusic)) StopMusicStream(rainMusic);
     ResetWaterFx();
     currentScreen = SCREEN_MENU;
-    rankMessage[0] = '\0'; // Limpa a mensagem de rank ao voltar ao menu
+    rankMessage[0] = '\0'; 
 }
 
 void StartGame() { 
@@ -99,14 +91,13 @@ void StartGame() {
     questionTimer = QUESTION_TIME; 
 }
 
-// <<< CORREÇÃO: Trocado 'char' por 'char *' em textCopy e 'MemFree(textCopy)' >>>
 void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float fontSize, float textSpacing, Color color) { 
     char textToProcess[1024]; 
     strcpy(textToProcess, text); 
     char lines[20][256]; 
     int lineCount = 0; 
-    char *textCopy = (char*)MemAlloc(strlen(textToProcess) + 1); // <<< DEVE SER char*
-    if (textCopy == NULL) return; // Checagem de alocação
+    char *textCopy = (char*)MemAlloc(strlen(textToProcess) + 1);
+    if (textCopy == NULL) return;
     strcpy(textCopy, textToProcess); 
     char *word = strtok(textCopy, " "); 
     char currentLine[256] = { 0 }; 
@@ -126,7 +117,7 @@ void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float f
     } 
     strcpy(lines[lineCount], currentLine); 
     lineCount++; 
-    MemFree(textCopy); // <<< Deve receber o ponteiro
+    MemFree(textCopy);
     float totalTextHeight = lineCount * fontSize + (lineCount - 1) * textSpacing; 
     float startY = rec.y + (rec.height - totalTextHeight) / 2; 
     for (int i = 0; i < lineCount; i++) { 
@@ -141,10 +132,18 @@ void DrawTextWrappedCentered(Font font, const char *text, Rectangle rec, float f
 //---------------------------------------------
 int main(void) {
     srand(time(NULL));
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Quiz - Navegando pela ODS 14");
+    
+    // Configura a janela para redimensionar e sincronizar
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+    InitWindow(1366, 768, "Quiz - Navegando pela ODS 14");
+    SetWindowMinSize(1024, 576);
     SetExitKey(KEY_NULL);
     InitAudioDevice();
     SetTargetFPS(60);
+
+    // Cria a textura onde o jogo será desenhado internamente (1920x1080)
+    targetCanvas = LoadRenderTexture(GAME_WIDTH, GAME_HEIGHT);
+    SetTextureFilter(targetCanvas.texture, TEXTURE_FILTER_BILINEAR);
 
     texMenu = LoadTexture("resources/images/tela_menu.png");
     texQuestion = LoadTexture("resources/images/tela_pergunta.png");
@@ -170,9 +169,44 @@ int main(void) {
     ResetPlayerScore(); 
     
     while (!WindowShouldClose()) {
-        UpdateDrawFrame();
+        // Cálculo do dimensionamento proporcional (Letterboxing)
+        float scale = fminf((float)GetScreenWidth() / GAME_WIDTH, (float)GetScreenHeight() / GAME_HEIGHT);
+        
+        // Posição real do mouse convertida para o espaço de coordenadas virtuais (1920x1080)
+        Vector2 mouseRaw = GetMousePosition();
+        Vector2 mouseVirtual = { 0 };
+        mouseVirtual.x = (mouseRaw.x - (GetScreenWidth() - (GAME_WIDTH * scale)) * 0.5f) / scale;
+        mouseVirtual.y = (mouseRaw.y - (GetScreenHeight() - (GAME_HEIGHT * scale)) * 0.5f) / scale;
+        
+        // Trava manual das coordenadas virtuais do mouse (sem depender de Vector2Clamp)
+        if (mouseVirtual.x < 0.0f) mouseVirtual.x = 0.0f;
+        if (mouseVirtual.x > (float)GAME_WIDTH) mouseVirtual.x = (float)GAME_WIDTH;
+        if (mouseVirtual.y < 0.0f) mouseVirtual.y = 0.0f;
+        if (mouseVirtual.y > (float)GAME_HEIGHT) mouseVirtual.y = (float)GAME_HEIGHT;
+
+        // 1. DESENHO NO CANVAS VIRTUAL (1920x1080)
+        BeginTextureMode(targetCanvas);
+            ClearBackground(WHITE);
+            UpdateDrawFrame(mouseVirtual);
+        EndTextureMode();
+
+        // 2. DESENHO DA TEXTURA NA TELA REAL
+        BeginDrawing();
+            ClearBackground(BLACK);
+
+            Rectangle sourceRec = { 0.0f, 0.0f, (float)targetCanvas.texture.width, (float)-targetCanvas.texture.height };
+            Rectangle destRec = { 
+                (GetScreenWidth() - ((float)GAME_WIDTH * scale)) * 0.5f, 
+                (GetScreenHeight() - ((float)GAME_HEIGHT * scale)) * 0.5f, 
+                (float)GAME_WIDTH * scale, 
+                (float)GAME_HEIGHT * scale 
+            };
+
+            DrawTexturePro(targetCanvas.texture, sourceRec, destRec, (Vector2){ 0, 0 }, 0.0f, WHITE);
+        EndDrawing();
     }
 
+    UnloadRenderTexture(targetCanvas);
     UnloadTexture(texMenu); UnloadTexture(texQuestion); UnloadTexture(texHowToPlay);
     UnloadTexture(texLeaderboard); UnloadTexture(texCredits); UnloadTexture(texLogo);
     UnloadFont(fontMontserrat);
@@ -190,12 +224,11 @@ int main(void) {
 //---------------------------------------------
 // Loop Principal de Atualização e Desenho
 //---------------------------------------------
-void UpdateDrawFrame(void) {
+void UpdateDrawFrame(Vector2 mousePos) {
     float deltaTime = GetFrameTime();
     float currentTime = GetTime();
-    Vector2 mousePos = GetMousePosition();
 
-    UpdateMusicPlayer();
+    UpdateMusicPlayerCustomMouse(mousePos);
     UpdateWaterFx(deltaTime, currentTime, mousePos);
     UpdateMusicStream(rainMusic);
 
@@ -306,20 +339,11 @@ void UpdateDrawFrame(void) {
                     }
                 }
                 
-                // <<< CORREÇÃO DE INDENTAÇÃO >>>
                 int keyPressed = -1;
-                if (IsKeyPressed(KEY_A)) {
-                    keyPressed = 0;
-                }
-                if (IsKeyPressed(KEY_B)) {
-                    keyPressed = 1;
-                }
-                if (IsKeyPressed(KEY_C)) {
-                    keyPressed = 2;
-                }
-                if (IsKeyPressed(KEY_D)) {
-                    keyPressed = 3;
-                }
+                if (IsKeyPressed(KEY_A)) keyPressed = 0;
+                if (IsKeyPressed(KEY_B)) keyPressed = 1;
+                if (IsKeyPressed(KEY_C)) keyPressed = 2;
+                if (IsKeyPressed(KEY_D)) keyPressed = 3;
                 
                 if (keyPressed != -1) { 
                     selectedAnswer = keyPressed; 
@@ -345,46 +369,21 @@ void UpdateDrawFrame(void) {
                 answerTimer -= deltaTime;
                 if (answerTimer <= 0) {
                     currentQuestionIndex++; selectedAnswer = -1;
-                    
                     if (currentQuestionIndex >= QUIZ_QUESTION_COUNT) { 
-                        // =========================================================
-                        // ==== INÍCIO DA NOVA LÓGICA DE RANKING (SUBSTITUÍDA) ====
-                        // =========================================================
-                        
                         int finalScore = GetPlayerScore();
-                        
-                        // 1. Envia o score e ATUALIZA a lista local do Top 6
-                        //    (Isso é importante para o passo 3)
                         UpdateLeaderboard(playerName, finalScore);
                         
-                        // 2. Pergunta ao Firebase qual é o nosso rank VERDADEIRO
-                        //    (Ex: pode retornar 8, 10, 20... etc.)
-                        int rank = GetPlayerRank(finalScore); 
-
-                        // 3. Pega a lista local do Top 6 (que já foi atualizada)
-                        const PlayerScore* top6 = GetLeaderboard(); 
-
-                        // 4. LÓGICA DA MENSAGEM:
-                        if (rank > LEADERBOARD_SIZE && rank > 0) {
-                            // Se nosso rank (ex: 7º, 8º) for PIOR que o 6º lugar...
-                            // ...nós mostramos a mensagem de "atrás de quem".
-                            // (top6[LEADERBOARD_SIZE - 1] é o 6º colocado)
-                            snprintf(rankMessage, sizeof(rankMessage), 
-                                     "Voce ficou em %dº, atras de %s (%d pts)!", 
-                                     rank, 
-                                     top6[LEADERBOARD_SIZE - 1].name,  // Nome do 6º colocado
-                                     top6[LEADERBOARD_SIZE - 1].score  // Pontos do 6º colocado
-                            );
+                        const PlayerScore* top6 = GetLeaderboard();
+                        if (finalScore <= top6[LEADERBOARD_SIZE - 1].score) {
+                            int rank = GetPlayerRank(finalScore);
+                            if (rank > 0) {
+                                snprintf(rankMessage, sizeof(rankMessage), "Voce esta em %dº POS atras de %s!!", rank, top6[LEADERBOARD_SIZE - 1].name);
+                            } else {
+                                rankMessage[0] = '\0';
+                            }
                         } else {
-                            // Se nosso rank for entre 1º e 6º, nós estamos no placar!
-                            // Ou se GetPlayerRank falhou (retornou -1)
-                            // Não precisa de mensagem, nosso nome já vai aparecer.
                             rankMessage[0] = '\0';
                         }
-                        
-                        // =========================================================
-                        // ==== FIM DA NOVA LÓGICA DE RANKING ====
-                        // =========================================================
                         
                         currentScreen = SCREEN_GAME_OVER; 
                     } 
@@ -397,9 +396,7 @@ void UpdateDrawFrame(void) {
         default: break;
     }
 
-    BeginDrawing();
-    ClearBackground(RAYWHITE);
-
+    // Desenho dos elementos
     switch (currentScreen) {
         case SCREEN_MENU: {
             DrawTexture(texMenu, 0, 0, WHITE);
@@ -417,7 +414,7 @@ void UpdateDrawFrame(void) {
                 float alpha = 1.0f; if (menuNotificationTimer < 0.5f) alpha = menuNotificationTimer / 0.5f;
                 Vector2 textSize = MeasureTextEx(fontMontserrat, menuNotificationText, 35, 2);
                 float rectWidth = textSize.x + 40; float rectHeight = textSize.y + 20;
-                Rectangle notificationRect = {(SCREEN_WIDTH - rectWidth) / 2, 850, rectWidth, rectHeight};
+                Rectangle notificationRect = {(GAME_WIDTH - rectWidth) / 2, 850, rectWidth, rectHeight};
                 DrawRectangleRec(notificationRect, Fade(BLACK, 0.7f * alpha));
                 DrawRectangleLinesEx(notificationRect, 2, Fade(WHITE, alpha));
                 DrawTextEx(fontMontserrat, menuNotificationText, (Vector2){notificationRect.x + 20, notificationRect.y + 10}, 35, 2, Fade(YELLOW, alpha));
@@ -438,31 +435,31 @@ void UpdateDrawFrame(void) {
                 const char* scoreText = TextFormat("%03d", leaderboard[i].score); 
                 DrawTextEx(fontMontserrat, scoreText, (Vector2){scoreX, startY + (i * stepY)}, fontSize, spacing, BLACK); 
             } 
-            if (rankMessage[0] != '\0') { // <<< DESENHA A MENSAGEM SE ELA EXISTIR
+            if (rankMessage[0] != '\0') {
                 Vector2 textSize = MeasureTextEx(fontMontserrat, rankMessage, 30, 2);
-                DrawTextEx(fontMontserrat, rankMessage, (Vector2){(SCREEN_WIDTH - textSize.x) / 2, 750}, 30, 2, BLACK);
+                DrawTextEx(fontMontserrat, rankMessage, (Vector2){(GAME_WIDTH - textSize.x) / 2, 750}, 30, 2, BLACK);
             }
         } break;
-        // <<< CORREÇÃO DA LINHA TRUNCADA >>>
         case SCREEN_ENTER_NAME: { 
+            
             DrawWaterFx(currentTime); 
             const char* title = "Tudo pronto para comecar!"; 
             const char* subtitle = "Aguarde a maré subir..."; 
             if (IsWaterAnimationFinished()) { 
                 subtitle = "Digite suas iniciais (3 letras):"; 
             } 
-            DrawTextEx(fontMontserrat, title, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, title, 60, 2).x/2, 300}, 60, 2, RAYWHITE); 
-            DrawTextEx(fontMontserrat, subtitle, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, subtitle, 40, 2).x/2, 500}, 40, 2, LIGHTGRAY); 
+            DrawTextEx(fontMontserrat, title, (Vector2){GAME_WIDTH/2 - MeasureTextEx(fontMontserrat, title, 60, 2).x/2, 300}, 60, 2, RAYWHITE); 
+            DrawTextEx(fontMontserrat, subtitle, (Vector2){GAME_WIDTH/2 - MeasureTextEx(fontMontserrat, subtitle, 40, 2).x/2, 500}, 40, 2, LIGHTGRAY); 
             if (IsWaterAnimationFinished()) { 
                 const char* hint = "Pressione ENTER para iniciar o quiz"; 
-                DrawRectangle(SCREEN_WIDTH/2 - 150, 560, 300, 80, RAYWHITE); 
-                DrawRectangleLines(SCREEN_WIDTH/2 - 150, 560, 300, 80, DARKGRAY); 
-                DrawTextEx(fontMontserrat, playerName, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, playerName, 60, 2).x/2, 570}, 60, 2, DARKBLUE); 
+                DrawRectangle(GAME_WIDTH/2 - 150, 560, 300, 80, RAYWHITE); 
+                DrawRectangleLines(GAME_WIDTH/2 - 150, 560, 300, 80, DARKGRAY); 
+                DrawTextEx(fontMontserrat, playerName, (Vector2){GAME_WIDTH/2 - MeasureTextEx(fontMontserrat, playerName, 60, 2).x/2, 570}, 60, 2, DARKBLUE); 
                 if (nameCharCount < MAX_NAME_LENGTH && ((int)(GetTime()*2.0f)) % 2 == 0) { 
                     Vector2 textSize = MeasureTextEx(fontMontserrat, playerName, 60, 2); 
-                    DrawTextEx(fontMontserrat, "_", (Vector2){SCREEN_WIDTH/2 - textSize.x/2 + textSize.x, 570}, 60, 2, DARKBLUE); 
+                    DrawTextEx(fontMontserrat, "_", (Vector2){GAME_WIDTH/2 - textSize.x/2 + textSize.x, 570}, 60, 2, DARKBLUE); 
                 } 
-                DrawTextEx(fontMontserrat, hint, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY); 
+                DrawTextEx(fontMontserrat, hint, (Vector2){GAME_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY); 
             } 
         } break;
         case SCREEN_GAMEPLAY: case SCREEN_SHOW_ANSWER: { 
@@ -471,7 +468,7 @@ void UpdateDrawFrame(void) {
             if (currentScreen == SCREEN_GAMEPLAY) { 
                 float timerPercentage = questionTimer / QUESTION_TIME; 
                 if (timerPercentage < 0) timerPercentage = 0; 
-                float barWidth = 800; float barX = (SCREEN_WIDTH - barWidth) / 2; 
+                float barWidth = 800; float barX = (GAME_WIDTH - barWidth) / 2; 
                 Color timerColor = GREEN; 
                 if (timerPercentage < 0.5f) timerColor = YELLOW; 
                 if (timerPercentage < 0.25f) timerColor = RED; 
@@ -500,13 +497,13 @@ void UpdateDrawFrame(void) {
             const char* questionTextStr = TextFormat("Questao: %02d/%d", currentQuestionIndex + 1, QUIZ_QUESTION_COUNT); 
             DrawTextEx(fontMontserrat, questionTextStr, (Vector2){40, 30}, 40, 2.0f, DARKBLUE); 
             
-            const char* difficultyText = "---"; // <<< CORREÇÃO DE WARNING
-            Color difficultyColor = GRAY;   // <<< CORREÇÃO DE WARNING
+            const char* difficultyText = "---";
+            Color difficultyColor = GRAY;   
             switch(q.difficulty) { 
                 case EASY: difficultyText = "FACIL"; difficultyColor = GREEN; break; 
                 case MEDIUM: difficultyText = "MEDIA"; difficultyColor = YELLOW; break; 
                 case HARD: difficultyText = "DIFICIL"; difficultyColor = RED; break; 
-                default: break; // Default é coberto pela inicialização
+                default: break; 
             } 
             DrawTextEx(fontMontserrat, difficultyText, (Vector2){40, 85}, 30, 2.0f, difficultyColor); 
             
@@ -517,7 +514,6 @@ void UpdateDrawFrame(void) {
             if (notificationTimer > 0) { 
                 const char* notificationText = TextFormat("+%d PONTOS", pointsGainedNotification); 
                 Vector2 scoreTextSize = MeasureTextEx(fontMontserrat, scoreText, 40, 2.0f); 
-                // Vector2 notificationTextSize; // <<< CORREÇÃO DE WARNING
                 float alpha = notificationTimer / 2.0f; 
                 DrawTextEx(fontMontserrat, notificationText, (Vector2){1650 + (scoreTextSize.x / 4), 30 + 45}, 25, 2.0f, Fade(GREEN, alpha)); 
             } 
@@ -527,14 +523,12 @@ void UpdateDrawFrame(void) {
             const char* title = "FIM DE JOGO!"; 
             const char* scoreText = TextFormat("Sua pontuacao final: %d", GetPlayerScore()); 
             const char* hint = "Pressione ENTER para ver o placar"; 
-            DrawTextEx(fontMontserrat, title, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, title, 80, 2).x/2, 350}, 80, 2, RAYWHITE); 
-            DrawTextEx(fontMontserrat, scoreText, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, scoreText, 50, 2).x/2, 500}, 50, 2, RAYWHITE); 
-            DrawTextEx(fontMontserrat, hint, (Vector2){SCREEN_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY); 
+            DrawTextEx(fontMontserrat, title, (Vector2){GAME_WIDTH/2 - MeasureTextEx(fontMontserrat, title, 80, 2).x/2, 350}, 80, 2, RAYWHITE); 
+            DrawTextEx(fontMontserrat, scoreText, (Vector2){GAME_WIDTH/2 - MeasureTextEx(fontMontserrat, scoreText, 50, 2).x/2, 500}, 50, 2, RAYWHITE); 
+            DrawTextEx(fontMontserrat, hint, (Vector2){GAME_WIDTH/2 - MeasureTextEx(fontMontserrat, hint, 30, 2).x/2, 700}, 30, 2, LIGHTGRAY); 
         } break;
         default: break;
     }
 
     DrawMusicPlayer();
-    
-    EndDrawing();
 }
